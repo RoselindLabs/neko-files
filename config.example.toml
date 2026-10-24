@@ -1,0 +1,17 @@
+[plugin]
+config_version = "1.0.0"
+enabled = false
+
+[access]
+group_ids = []
+user_ids = []
+account_id = ""
+group_catalog = false
+ocr = false
+
+[limits]
+file_mib = 20
+cache_mib = 256
+timeout_seconds = 100
+output_chars = 8000
+reads_per_minute = 5

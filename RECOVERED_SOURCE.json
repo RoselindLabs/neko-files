@@ -1,0 +1,70 @@
+{
+  "source": "/root/maibot-backups/neko-files-enable-20261021T044038Z/failed-runtime/plugins/neko-files",
+  "kind": "failed-install-runtime-source-only",
+  "excluded": [
+    "config.toml",
+    "data",
+    ".venv",
+    "__pycache__"
+  ],
+  "missing_from_recovered_tree": [
+    "original tests/",
+    "original scripts/",
+    "pyproject.toml",
+    ".git"
+  ],
+  "files": {
+    "LICENSE": {
+      "bytes": 1083,
+      "sha256": "95a0822d935d12fef6ab93de8e94eece0feac8585258d8689cd9dc862b886da6"
+    },
+    "README.md": {
+      "bytes": 8073,
+      "sha256": "0cac66e1909b58cbd4672a20637243d27d422a2d634cfad90151a9900afa8157"
+    },
+    "_manifest.json": {
+      "bytes": 1171,
+      "sha256": "96e7969dbb4468a05518b36383a56eaf824de4f59652225d73755cd88b54d8bd"
+    },
+    "archives.py": {
+      "bytes": 4979,
+      "sha256": "e75d90bb2073c75e42570600b7a285e34f3d47cfc9e81ac28211a7b6be0f9523"
+    },
+    "authorization.py": {
+      "bytes": 2838,
+      "sha256": "6e26b0e85ee125564a88b8500c806b237b266a4d074ae2182cebbef36fb18744"
+    },
+    "cache.py": {
+      "bytes": 2489,
+      "sha256": "aa18b26f1f8d129a0bb394169a4095ba72cee8fa6f9b71ca4f62c4a0bbe8e696"
+    },
+    "config.example.toml": {
+      "bytes": 217,
+      "sha256": "6c9fa1167f72ce060c3bba8c8b090211bf6d5b97f22049eaed9ee1d088b2d66b"
+    },
+    "config.py": {
+      "bytes": 1700,
+      "sha256": "5208d7b2b7cb27f644dc2d4b550b6eec20d81c4776046503edba6432e75d94f8"
+    },
+    "plugin.py": {
+      "bytes": 25171,
+      "sha256": "a8b93ede67120401bf095bef4f93d40304a159f22a62a8eb91fa339e72300e32"
+    },
+    "reading.py": {
+      "bytes": 2882,
+      "sha256": "a111c9a0f6a7c32fc89dfd2de737c0c1a6a411dd0a4a04c84125c314b746a709"
+    },
+    "store.py": {
+      "bytes": 4217,
+      "sha256": "8c6e7822eb80e096311edde7d7af5b1e1380bba15f464e2c40f4908b5b202bae"
+    },
+    "transport.py": {
+      "bytes": 6441,
+      "sha256": "869d1340ca9d645ee60673ee00ddc0aef90cb6f7ce1f9237f3e8b2e8ad4465b9"
+    },
+    "worker.py": {
+      "bytes": 7468,
+      "sha256": "fe4be040f57de62c22193dc86191c5c0da76e56b5b7a927178e70eb86ab85027"
+    }
+  }
+}

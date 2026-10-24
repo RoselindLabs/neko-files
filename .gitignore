@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+dist/
+config.toml
+data/
+*.db
+*.sqlite*
+*.part
+*.egg-info/
+logs/
