@@ -1,4 +1,4 @@
-# Neko Files 0.2.0 — local repair, not activated
+# Neko Files 0.2.1 — local repair, not activated
 
 按需读取独立授权的 QQ 群文件/文档和一份压缩包成员。默认关闭、空名单拒绝，
 不自动下载、不发送聊天消息、不自动 OCR。当前是本地修复工作区，没有新建公开插件仓库或 Release。
@@ -13,8 +13,9 @@
   不从失败备份自动恢复配置，不复制其他插件或朋友的授权名单。
 - `access.group_ids/user_ids/account_id` 独立维护；群成员不必逐个加私聊名单。
   读取资源前核对适配器实际 `get_login_info`，不以传账号参数冒充多账号路由。
-- `group_catalog` 和 `ocr` 独立默认关闭。只保留既有 `group_upload` 元数据登记、显式当前群目录。
-  **聊天原生视频/私聊附件新取源尚未在本轮接入**；后续视频入口应复用 Neko Video，不能传任意本地路径绕授权。
+- `group_catalog` 和 `ocr` 独立默认关闭。除既有 `group_upload` 元数据登记外，0.2.1 起也登记
+  普通消息的 `qq_file_attachments` 文件附件（跳过 `resource_type=video`，聊天视频归 Neko Video）。
+  **私聊附件取源尚未接入**；聊天原生视频由 Neko Video 1.4.0 的 `neko_video_chat` 读取，不能传任意本地路径绕授权。
 
 ## 工具
 

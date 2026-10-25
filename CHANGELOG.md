@@ -1,3 +1,9 @@
+# 0.2.1 local repair
+
+- Register normal in-message `qq_file_attachments` file metadata alongside group-upload notices; chat-native video attachments (`resource_type=video`) are left to Neko Video, and private-chat file URL retrieval stays unimplemented.
+- Registration is bounded (≤8 per message), skips entries without usable identity, and stays scope/account-checked through the existing receive authorization path.
+- No production activation, private-attachment retrieval, public plugin release or license relabeling.
+
 # 0.2.0 local repair
 
 - Add explicit configuration version and opt-in trusted host context in the MaiBot fork.

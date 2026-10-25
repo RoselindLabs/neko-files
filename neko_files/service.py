@@ -156,9 +156,18 @@ class FileService:
         info = message.get("message_info") or {}
         extra = info.get("additional_config") or {}
         notice = extra.get("napcat_notice_payload") or {}
-        if extra.get("napcat_notice_type") != "group_upload" or not isinstance(
+        raw_files = []
+        if extra.get("napcat_notice_type") == "group_upload" and isinstance(
             notice.get("file"), dict
         ):
+            raw_files.append(("notice", notice["file"]))
+        attachments = extra.get("qq_file_attachments")
+        # Chat-native video attachments belong to the video plugin, not files.
+        if isinstance(attachments, list):
+            raw_files.extend(
+                ("attachment", item) for item in attachments if isinstance(item, dict)
+            )
+        if not raw_files:
             return {"action": "continue"}
         envelope = {
             "contract": "neko.tools.context.v1",
@@ -171,15 +180,32 @@ class FileService:
         }
 
         async def operation(c, check):
-            if not c["group"] or str(notice.get("group_id") or "") != c["group"]:
-                raise FileError("上传通知群归属无法核实")
-            item = await self.db("register", c, notice["file"], message.get("message_id", ""))
-            return {"file": public(item)}
+            registered = []
+            for kind, raw in raw_files[:8]:
+                if kind == "notice":
+                    if not c["group"] or str(notice.get("group_id") or "") != c["group"]:
+                        raise FileError("上传通知群归属无法核实")
+                if str(raw.get("resource_type") or "") == "video":
+                    continue
+                try:
+                    registered.append(
+                        await self.db(
+                            "register", c, raw, message.get("message_id", "")
+                        )
+                    )
+                except FileError:
+                    continue
+            if not registered:
+                raise FileError("没有可登记的文件附件")
+            return {"files": [public(item) for item in registered]}
 
         result = await self.perform(envelope, operation, read=False)
         if not result.get("success"):
             return {"action": "continue"}
-        marker = "\n[Neko Files 文件索引] " + json.dumps(result["file"], ensure_ascii=False)
+        marker = (
+            "\n[Neko Files 文件索引] "
+            + json.dumps(result["files"], ensure_ascii=False)
+        )
         return {
             "action": "continue",
             "modified_kwargs": dict(

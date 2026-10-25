@@ -126,6 +126,76 @@ class ServiceTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(await self.service.db("recent", scope()), [])
 
+    async def test_receive_registers_message_file_attachments_skipping_videos(self):
+        message = {
+            "session_id": "a",
+            "platform": "qq",
+            "account_id": "789",
+            "message_id": "m1",
+            "message_info": {
+                "group_info": {"group_id": "123"},
+                "user_info": {"user_id": "111"},
+                "additional_config": {
+                    "qq_file_attachments": [
+                        {"file_id": "doc1", "name": "report.pdf", "size": 10, "busid": 3},
+                        {"resource_type": "video", "file_id": "v1", "name": "clip.mp4", "size": 9},
+                        {"name": "no-ident"},
+                        "junk",
+                    ]
+                },
+            },
+        }
+        self.ctx.api.call.return_value = {"status": "ok", "data": {"user_id": "789"}}
+        result = await self.service.receive(message, {})
+        self.assertIn("[Neko Files 文件索引]", result["modified_kwargs"]["message"]["processed_plain_text"])
+        files = await self.service.db("recent", scope())
+        self.assertEqual([f["name"] for f in files], ["report.pdf"])
+
+    async def test_receive_still_registers_group_upload_notice_alongside_attachments(self):
+        message = {
+            "session_id": "a",
+            "platform": "qq",
+            "account_id": "789",
+            "message_id": "m2",
+            "message_info": {
+                "group_info": {"group_id": "123"},
+                "user_info": {"user_id": "111"},
+                "additional_config": {
+                    "napcat_notice_type": "group_upload",
+                    "napcat_notice_payload": {
+                        "group_id": 123,
+                        "file": {"file_id": "notice1", "name": "up.zip", "size": 5, "busid": 2},
+                    },
+                },
+            },
+        }
+        self.ctx.api.call.return_value = {"status": "ok", "data": {"user_id": "789"}}
+        result = await self.service.receive(message, {})
+        self.assertTrue(result["modified_kwargs"])
+        files = await self.service.db("recent", scope())
+        self.assertEqual([f["name"] for f in files], ["up.zip"])
+
+    async def test_receive_without_attachments_or_unauthorized_scope_is_passthrough(self):
+        plain = {
+            "session_id": "a",
+            "message_info": {"additional_config": {}, "user_info": {}},
+        }
+        self.assertEqual((await self.service.receive(plain, {}))["action"], "continue")
+        outside = {
+            "session_id": "zzz",
+            "platform": "qq",
+            "account_id": "789",
+            "message_info": {
+                "group_info": {"group_id": "999"},
+                "user_info": {"user_id": "111"},
+                "additional_config": {
+                    "qq_file_attachments": [{"file_id": "x", "name": "x.txt", "size": 1}]
+                },
+            },
+        }
+        self.assertEqual((await self.service.receive(outside, {}))["action"], "continue")
+        self.assertEqual(await self.service.db("recent", scope()), [])
+
     async def test_disabled_plugin_starts_no_state_and_declares_only_opted_in_tools(self):
         config = Config()
         self.assertFalse(config.plugin.enabled)
