@@ -54,7 +54,7 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_list",
-        brief_description="列出当前聊天文件，或按需查询当前群目录。",
+        brief_description="列出当前聊天已有文件索引；不下载。群目录只在用户明确要查时用include_group=true。",
         detailed_description="只返回索引，不下载。include_group仅用于明确查询且管理员开启的当前群目录。next_cursor续读5分钟作用域快照；来源超限会标记source_truncated。",
         parameters=[
             param("include_group", "查询当前群目录", ToolParamType.BOOLEAN),
@@ -72,7 +72,7 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_inspect",
-        brief_description="查看当前文件结构、正文预览或压缩包目录。",
+        brief_description="查看一个文件的结构、有限预览或压缩包目录；不是全文。",
         detailed_description="只读当前聊天file_ref。预览不是全文；扫描PDF须管理员授权后显式单页OCR。",
         parameters=[param("file_ref", "当前聊天文件编号", required=True)],
         platforms=["qq"],
@@ -84,17 +84,17 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_read",
-        brief_description="按范围读取文档、续读或显式单页OCR。",
+        brief_description="按页/行/段落范围读取文档正文、关键词查找、续读，或显式单页OCR。",
         detailed_description="页/行/段从1开始。关键词先按next_offset读完当前批，再用next_match_offset查下批。OCR仅显式单页，续读只读缓存，未知不重试。",
         parameters=[
             param("file_ref", "当前聊天文件编号", required=True),
-            param("start", "开始页/行/段落", ToolParamType.INTEGER),
+            param("start", "开始页/行/段落，从1开始", ToolParamType.INTEGER),
             param("end", "结束位置，0为默认范围", ToolParamType.INTEGER),
-            param("sheet", "XLSX工作表"),
-            param("keyword", "关键词"),
-            param("offset", "同范围字符偏移", ToolParamType.INTEGER),
-            param("ocr", "显式单页OCR", ToolParamType.BOOLEAN),
-            param("match_offset", "关键词命中偏移", ToolParamType.INTEGER),
+            param("sheet", "XLSX工作表名"),
+            param("keyword", "关键词，从offset起查找"),
+            param("offset", "同范围字符偏移，续读用上次next_offset", ToolParamType.INTEGER),
+            param("ocr", "显式单页OCR，仅管理员开启时可用", ToolParamType.BOOLEAN),
+            param("match_offset", "关键词命中偏移，续读用next_match_offset", ToolParamType.INTEGER),
         ],
         platforms=["qq"],
         trusted_context=CONTRACT,
@@ -126,11 +126,11 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_archive_read",
-        brief_description="读取压缩包中明确指定的文档成员。",
+        brief_description="读取压缩包目录中一份指定文档成员；先inspect看目录，不递归不执行。",
         detailed_description="先inspect查看目录，member按目录填写。仅一份文档，不执行、不递归、不读包内视频或密码包。返回成员file_ref用于续读。",
         parameters=[
             param("file_ref", "原压缩包编号", required=True),
-            param("member", "完整成员名", required=True),
+            param("member", "完整成员名，按inspect目录填写", required=True),
         ],
         platforms=["qq"],
         trusted_context=CONTRACT,

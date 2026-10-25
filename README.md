@@ -1,4 +1,4 @@
-# Neko Files 0.2.2 — local repair, not activated
+# Neko Files 0.2.3 — local repair, not activated
 
 按需读取独立授权的 QQ 群文件/文档和一份压缩包成员。默认关闭、空名单拒绝，
 不自动下载、不发送聊天消息、不自动 OCR。当前是本地修复工作区，没有新建公开插件仓库或 Release。

@@ -1,3 +1,8 @@
+# 0.2.3 local repair
+
+- Tool hints: move the operation-critical semantics out of `detailed_description` (which this host never sends to the model) into the model-visible briefs and parameter descriptions — pagination starts at 1, OCR is explicit single-page and admin-gated, cursors are for continuation, archive members must match the inspected listing.
+- No behavior change; registration/download paths stay as in 0.2.2.
+
 # 0.2.2 local repair
 
 - Fix the 0.2.1 registration assumption: this host's `additional_config` never carries `qq_file_attachments` (that structure belongs to a different environment). In-message files are instead recovered from the adapter's flattened `[文件] name，大小: n，链接: <url>` text marker; the direct link is stored as the item identity and used verbatim on download, no adapter call needed to fetch a URL.
