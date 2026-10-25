@@ -126,30 +126,41 @@ class ServiceTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(await self.service.db("recent", scope()), [])
 
-    async def test_receive_registers_message_file_attachments_skipping_videos(self):
+    async def test_receive_registers_message_file_links_from_flattened_text(self):
         message = {
             "session_id": "a",
             "platform": "qq",
             "account_id": "789",
             "message_id": "m1",
+            "processed_plain_text": (
+                "给你文件\n[文件] report.pdf，大小: 10，链接: https://ftn.qq.com/dl/abc123\n后面"
+            ),
             "message_info": {
                 "group_info": {"group_id": "123"},
                 "user_info": {"user_id": "111"},
-                "additional_config": {
-                    "qq_file_attachments": [
-                        {"file_id": "doc1", "name": "report.pdf", "size": 10, "busid": 3},
-                        {"resource_type": "video", "file_id": "v1", "name": "clip.mp4", "size": 9},
-                        {"name": "no-ident"},
-                        "junk",
-                    ]
-                },
+                "additional_config": {},
             },
         }
         self.ctx.api.call.return_value = {"status": "ok", "data": {"user_id": "789"}}
         result = await self.service.receive(message, {})
-        self.assertIn("[Neko Files 文件索引]", result["modified_kwargs"]["message"]["processed_plain_text"])
+        self.assertIn(
+            "[Neko Files 文件索引]",
+            result["modified_kwargs"]["message"]["processed_plain_text"],
+        )
         files = await self.service.db("recent", scope())
         self.assertEqual([f["name"] for f in files], ["report.pdf"])
+        self.assertTrue(files[0]["file_id"].startswith("https://ftn.qq.com/"))
+
+    async def test_file_links_extracts_only_file_markers_with_urls(self):
+        from neko_files.service import file_links
+
+        self.assertEqual(
+            file_links("[文件] a.zip，大小: 5，链接: https://x.test/f.zip"),
+            [("a.zip", "https://x.test/f.zip")],
+        )
+        self.assertEqual(file_links("[视频] 文件: v.mp4，大小: 1"), [])
+        self.assertEqual(file_links("[文件] no-link.pdf"), [])
+        self.assertEqual(file_links("普通消息"), [])
 
     async def test_receive_still_registers_group_upload_notice_alongside_attachments(self):
         message = {
@@ -185,12 +196,11 @@ class ServiceTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
             "session_id": "zzz",
             "platform": "qq",
             "account_id": "789",
+            "processed_plain_text": "[文件] x.txt，大小: 1，链接: https://x.test/x.txt",
             "message_info": {
                 "group_info": {"group_id": "999"},
                 "user_info": {"user_id": "111"},
-                "additional_config": {
-                    "qq_file_attachments": [{"file_id": "x", "name": "x.txt", "size": 1}]
-                },
+                "additional_config": {},
             },
         }
         self.assertEqual((await self.service.receive(outside, {}))["action"], "continue")

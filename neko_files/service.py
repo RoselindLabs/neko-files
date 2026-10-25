@@ -6,6 +6,7 @@ from pathlib import Path
 import asyncio
 import json
 import os
+import re
 import secrets
 import time
 import uuid
@@ -19,6 +20,21 @@ from .reading import window
 from .store import Store, public
 from .transport import download
 from .worker import DOCUMENTS
+
+FILE_LINK = re.compile(
+    r"\[文件\]\s*([^\n，,]{1,240}?)(?:，\s*大小:\s*\d+)?，?\s*链接:\s*(https?://[^\s，,\]]+)"
+)
+
+
+def file_links(text):
+    """The adapter flattens file segments to text; recover (name, direct url) pairs."""
+    result = []
+    for match in FILE_LINK.finditer(str(text or "")):
+        name = match.group(1).replace("\\", "/").rsplit("/", 1)[-1].strip()
+        url = match.group(2)
+        if name and url.startswith(("http://", "https://")):
+            result.append((name[:240], url))
+    return result[:8]
 
 
 class FileService:
@@ -161,12 +177,9 @@ class FileService:
             notice.get("file"), dict
         ):
             raw_files.append(("notice", notice["file"]))
-        attachments = extra.get("qq_file_attachments")
-        # Chat-native video attachments belong to the video plugin, not files.
-        if isinstance(attachments, list):
-            raw_files.extend(
-                ("attachment", item) for item in attachments if isinstance(item, dict)
-            )
+        # The adapter flattens file segments to text with a direct download link.
+        for name, url in file_links(message.get("processed_plain_text")):
+            raw_files.append(("link", {"file_id": url, "name": name, "size": 0, "url": url}))
         if not raw_files:
             return {"action": "continue"}
         envelope = {
@@ -185,13 +198,9 @@ class FileService:
                 if kind == "notice":
                     if not c["group"] or str(notice.get("group_id") or "") != c["group"]:
                         raise FileError("上传通知群归属无法核实")
-                if str(raw.get("resource_type") or "") == "video":
-                    continue
                 try:
                     registered.append(
-                        await self.db(
-                            "register", c, raw, message.get("message_id", "")
-                        )
+                        await self.db("register", c, raw, message.get("message_id", ""))
                     )
                 except FileError:
                     continue
@@ -202,10 +211,7 @@ class FileService:
         result = await self.perform(envelope, operation, read=False)
         if not result.get("success"):
             return {"action": "continue"}
-        marker = (
-            "\n[Neko Files 文件索引] "
-            + json.dumps(result["files"], ensure_ascii=False)
-        )
+        marker = "\n[Neko Files 文件索引] " + json.dumps(result["files"], ensure_ascii=False)
         return {
             "action": "continue",
             "modified_kwargs": dict(
@@ -313,18 +319,23 @@ class FileService:
         if source is None:
             if item["parent"]:
                 raise FileError("成员缓存过期，请从原压缩包重新读取指定成员")
-            if c["group"]:
+            if str(item["file_id"]).startswith(("http://", "https://")):
+                # Message-link registration already carries its direct download url.
+                url = item["file_id"]
+            elif c["group"]:
                 resource = await self.api(
                     c,
                     "get_group_file_url",
                     {"group_id": c["group"], "file_id": item["file_id"], "busid": item["busid"]},
                 )
+                url = resource.get("url")
             else:
                 resource = await self.api(
                     c, "get_private_file_url", {"user_id": c["user"], "file_id": item["file_id"]}
                 )
+                url = resource.get("url")
             check()
-            await download(resource.get("url"), raw, limit, item["size"])
+            await download(url, raw, limit, item["size"])
             check()
             source = await self.cache.commit(item["ref"], ext)
             check()

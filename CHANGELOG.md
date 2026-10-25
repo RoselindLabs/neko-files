@@ -1,3 +1,10 @@
+# 0.2.2 local repair
+
+- Fix the 0.2.1 registration assumption: this host's `additional_config` never carries `qq_file_attachments` (that structure belongs to a different environment). In-message files are instead recovered from the adapter's flattened `[文件] name，大小: n，链接: <url>` text marker; the direct link is stored as the item identity and used verbatim on download, no adapter call needed to fetch a URL.
+- Group-upload notice registration is unchanged. Downloads still pass the public-only URL validator with full commit records; unsupported extensions and size limits still refuse before any network work.
+- Message-link registrations report size 0 until first download (the marker carries no reliable size); the per-file limit is enforced against the real downloaded length.
+- No production activation, private-attachment API retrieval, public plugin release or license relabeling.
+
 # 0.2.1 local repair
 
 - Register normal in-message `qq_file_attachments` file metadata alongside group-upload notices; chat-native video attachments (`resource_type=video`) are left to Neko Video, and private-chat file URL retrieval stays unimplemented.
