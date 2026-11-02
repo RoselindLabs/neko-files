@@ -54,11 +54,11 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_list",
-        brief_description="列出当前聊天文件；message_id登记旧消息或一跳引用附件，不下载。群目录须明确要求。",
+        brief_description="列当前聊天/群目录索引；根目录省略folder_id，子目录用返回编号；失败/未读完不等于没有文件。",
         detailed_description="只返回索引，不下载。include_group仅用于明确查询且管理员开启的当前群目录。next_cursor续读5分钟作用域快照；来源超限会标记source_truncated。",
         parameters=[
             param("include_group", "查询当前群目录", ToolParamType.BOOLEAN),
-            param("folder_id", "当前群目录编号"),
+            param("folder_id", "子目录真实编号，只用返回值；群根目录省略，不猜0/root"),
             param("cursor", "上次的next_cursor，续读只填此项"),
             param("message_id", "真实消息ID或引用所在消息ID；最多一跳，与目录/游标互斥；不猜短编号"),
         ],

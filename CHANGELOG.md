@@ -25,3 +25,9 @@
 - Store XLSX sheet/row independently; retain bounded parser/archive/continuation behavior.
 - Rebuild focused regressions, isolated SDK source packaging and real Runner business activation/RPC/reload/unload QA.
 - No production activation, new chat-video ingestion, public plugin release or license relabeling.
+# 0.3.1 source preparation
+
+- Separate group catalog metadata sizes from download limits: an unrelated large file no longer rejects the whole directory.
+- Preserve usable rows with explicit skipped/partial indicators; never report all-invalid metadata as an empty directory.
+- Clarify root/real folder IDs and incomplete searches; identify failed QQ action/retcode without raw response disclosure.
+- No production deployment, config/permission changes, QQ download/OCR or license-hold removal.

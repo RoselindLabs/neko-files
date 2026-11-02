@@ -21,7 +21,7 @@ def message_id(value):
 
 
 def bounded_int(value, maximum=40 * 1024**2):
-    if isinstance(value, str) and re.fullmatch(r"[0-9]{1,10}", value):
+    if isinstance(value, str) and re.fullmatch(r"[0-9]{1,19}", value):
         value = int(value)
     if type(value) is not int or not 0 <= value <= maximum:
         raise FileError("文件大小或资源类型无效/超限")
@@ -94,7 +94,11 @@ def attachment(raw, ident, slot, kind="message"):
     return {
         "file_id": file_id,
         "name": name,
-        "size": bounded_int(raw.get("size", raw.get("file_size", 0))),
+        # Catalog metadata is not download admission. An unrelated large file
+        # must not hide every small document in the same directory. document()
+        # still enforces the configured download/parser byte limit.
+        "size": bounded_int(raw.get("size", raw.get("file_size", 0)),
+                            2**63 - 1 if kind == 'catalog' else 40 * 1024**2),
         "busid": bounded_int(raw.get("busid", 0), 2**31 - 1),
         "url": url,
         "source": {"kind": kind, "slot": slot},
