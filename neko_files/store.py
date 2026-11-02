@@ -1,4 +1,7 @@
-"""Private, bounded, chat/account-scoped file metadata. No resource URLs persisted."""
+"""Scoped metadata in one registry. Short-lived URLs are private, not platform IDs.
+
+Optional JSON source fields preserve existing schema/refs and OCR attempt records.
+"""
 
 from pathlib import Path
 import hashlib
@@ -43,7 +46,8 @@ class Store:
     def _item(self, c, raw, message_id="", parent="", member=""):
         if not isinstance(raw, dict):
             raise FileError("文件元数据格式无效")
-        ident = raw.get("file_id") or raw.get("id")
+        file_id = raw.get("file_id") or raw.get("id") or ""
+        ident = file_id or raw.get("source_key")
         name = raw.get("file_name") or raw.get("name")
         if not isinstance(ident, str) or not 0 < len(ident) <= 1024 or not isinstance(name, str):
             raise FileError("文件元数据缺少有效编号或文件名")
@@ -61,7 +65,7 @@ class Store:
         ref = "f_" + hashlib.sha256((self.scope(c) + "\0" + ident).encode()).hexdigest()[:24]
         item = {
             "ref": ref,
-            "file_id": ident,
+            "file_id": file_id,
             "name": name,
             "size": size,
             "busid": busid,
@@ -69,32 +73,54 @@ class Store:
             "parent": parent,
             "member": member,
         }
+        if "source" in raw:
+            source = raw["source"]
+            if (
+                not isinstance(source, dict)
+                or source.get("kind") not in ["message", "notice", "catalog", "text_candidate"]
+                or type(source.get("slot")) is not int
+                or not 0 <= source["slot"] < 500
+            ):
+                raise FileError("来源元数据无效")
+            item.update(source=dict(source), url=raw.get("url", ""), url_seen=time.time())
         return ref, item
+
+    def _save(self, con, c, ref, item):
+        old = con.execute("SELECT data,scope FROM files WHERE id=?", (ref,)).fetchone()
+        if old and old[1] != self.scope(c):
+            raise FileError("索引作用域冲突，保留现场")
+        if old and item.get("source", {}).get("kind") in ["message", "notice", "catalog"]:
+            previous = json.loads(old[0])
+            if previous["name"] != item["name"] or (
+                previous["size"] and item["size"] and previous["size"] != item["size"]
+            ):
+                raise FileError("同一资源元数据发生变化，保留缓存；请单独重新提供文件")
+            if not item["size"]:
+                item["size"] = previous["size"]
+            # Fresh scope-proven registration may update URL/provenance, never extend 7-day TTL.
+            con.execute("UPDATE files SET data=? WHERE id=?", (json.dumps(item), ref))
+        elif not old:
+            con.execute(
+                "INSERT INTO files VALUES (?,?,?,?)",
+                (ref, self.scope(c), time.time(), json.dumps(item, ensure_ascii=False)),
+            )
 
     def register(self, c, raw, message_id="", parent="", member=""):
         ref, item = self._item(c, raw, message_id, parent, member)
         with self.connect() as con:
             con.execute("DELETE FROM files WHERE created < ?", (time.time() - 7 * 86400,))
-            con.execute(
-                "INSERT OR IGNORE INTO files VALUES (?,?,?,?)",
-                (ref, self.scope(c), time.time(), json.dumps(item, ensure_ascii=False)),
-            )
+            self._save(con, c, ref, item)
             con.execute(
                 "DELETE FROM files WHERE id IN (SELECT id FROM files ORDER BY created DESC LIMIT -1 OFFSET 2048)"
             )
         return self.get(c, ref)
 
-    def register_many(self, c, records):
-        prepared = [self._item(c, raw) for raw in records]
+    def register_many(self, c, records, message_id=""):
+        prepared = [self._item(c, raw, message_id) for raw in records]
         with self.connect() as con:
             con.execute("DELETE FROM files WHERE created < ?", (time.time() - 7 * 86400,))
-            con.executemany(
-                "INSERT OR IGNORE INTO files VALUES (?,?,?,?)",
-                [
-                    (ref, self.scope(c), time.time(), json.dumps(item, ensure_ascii=False))
-                    for ref, item in prepared
-                ],
-            )
+            for ref, item in prepared:
+                self._save(con, c, ref, item)
             con.execute(
                 "DELETE FROM files WHERE id IN (SELECT id FROM files ORDER BY created DESC LIMIT -1 OFFSET 2048)"
             )
@@ -138,4 +164,10 @@ class Store:
 
 
 def public(item):
-    return {k: item[k] for k in ["ref", "name", "size", "message_id", "parent", "member"]}
+    result = {k: item[k] for k in ["ref", "name", "size", "message_id", "parent", "member"]}
+    kind = item.get("source", {}).get("kind", "legacy")
+    if kind == "legacy" and str(item["file_id"]).startswith(("http://", "https://")):
+        kind = "text_candidate"
+    result["source_kind"] = kind
+    result["source_verified"] = kind in ["message", "notice", "catalog"]
+    return result

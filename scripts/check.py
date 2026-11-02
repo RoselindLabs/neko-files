@@ -21,7 +21,7 @@ def ids(group):
 if __name__ == "__main__":
     suite = unittest.defaultTestLoader.discover(str(ROOT / "tests"), top_level_dir=str(ROOT))
     collected = set(ids(suite))
-    for group in ["test_cache", "test_documents", "test_service", "test_transport", "test_release"]:
+    for group in ["test_cache", "test_documents", "test_service", "test_sources", "test_transport", "test_release"]:
         if not any(name.startswith("tests." + group + ".") for name in collected):
             raise SystemExit("Missing safety group: " + group)
     result = unittest.TextTestRunner(verbosity=2).run(suite)

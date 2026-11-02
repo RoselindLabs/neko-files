@@ -54,20 +54,21 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_list",
-        brief_description="列出当前聊天已有文件索引；不下载。群目录只在用户明确要查时用include_group=true。",
+        brief_description="列出当前聊天文件；message_id登记旧消息或一跳引用附件，不下载。群目录须明确要求。",
         detailed_description="只返回索引，不下载。include_group仅用于明确查询且管理员开启的当前群目录。next_cursor续读5分钟作用域快照；来源超限会标记source_truncated。",
         parameters=[
             param("include_group", "查询当前群目录", ToolParamType.BOOLEAN),
             param("folder_id", "当前群目录编号"),
             param("cursor", "上次的next_cursor，续读只填此项"),
+            param("message_id", "真实消息ID或引用所在消息ID；最多一跳，与目录/游标互斥；不猜短编号"),
         ],
         platforms=["qq"],
         trusted_context=CONTRACT,
         timeout_ms=190000,
     )
-    async def list_files(self, include_group=False, folder_id="", cursor="", **kwargs):
+    async def list_files(self, include_group=False, folder_id="", cursor="", message_id="", **kwargs):
         return await self.service.list_files(
-            kwargs.get("_host_context"), include_group, folder_id, cursor
+            kwargs.get("_host_context"), include_group, folder_id, cursor, message_id
         )
 
     @Tool(

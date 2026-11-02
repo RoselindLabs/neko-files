@@ -20,6 +20,7 @@ from .reading import window
 from .store import Store, public
 from .transport import download
 from .worker import DOCUMENTS
+from . import sources
 
 FILE_LINK = re.compile(
     r"\[文件\]\s*([^\n，,]{1,240}?)(?:，\s*大小:\s*\d+)?，?\s*链接:\s*(https?://[^\s，,\]]+)"
@@ -74,8 +75,13 @@ class FileService:
     async def exists(self, path):
         return await io_call(path.exists)
 
-    async def db(self, method, *args):
+    async def db(self, method, *args, check=None):
         async with self.registry_lock:
+            if check is not None:
+                check()
+            # Write admission is here, after lock wait and before starting owned IO.
+            # Revocation after IO starts cannot roll back a thread's transaction;
+            # callers still recheck before returning, and cancellation drains IO.
             return await io_call(getattr(self.store, method), *args)
 
     def current(self, generation, snapshot):
@@ -170,17 +176,21 @@ class FileService:
         if not self.ready or not isinstance(message, dict):
             return {"action": "continue"}
         info = message.get("message_info") or {}
+        if not isinstance(info, dict):
+            return {"action": "continue"}
         extra = info.get("additional_config") or {}
-        notice = extra.get("napcat_notice_payload") or {}
-        raw_files = []
-        if extra.get("napcat_notice_type") == "group_upload" and isinstance(
-            notice.get("file"), dict
+        segments = message.get("raw_message") or []
+        if (
+            not isinstance(extra, dict)
+            or not isinstance(segments, list)
+            or len(segments) > 128
         ):
-            raw_files.append(("notice", notice["file"]))
-        # The adapter flattens file segments to text with a direct download link.
-        for name, url in file_links(message.get("processed_plain_text")):
-            raw_files.append(("link", {"file_id": url, "name": name, "size": 0, "url": url}))
-        if not raw_files:
+            return {"action": "continue"}
+        if (
+            extra.get("napcat_notice_type") != "group_upload"
+            and not any(isinstance(part, dict) and part.get("type") == "file" for part in segments)
+            and not file_links(message.get("processed_plain_text"))
+        ):
             return {"action": "continue"}
         envelope = {
             "contract": "neko.tools.context.v1",
@@ -193,19 +203,19 @@ class FileService:
         }
 
         async def operation(c, check):
-            registered = []
-            for kind, raw in raw_files[:8]:
-                if kind == "notice":
-                    if not c["group"] or str(notice.get("group_id") or "") != c["group"]:
-                        raise FileError("上传通知群归属无法核实")
-                try:
-                    registered.append(
-                        await self.db("register", c, raw, message.get("message_id", ""))
-                    )
-                except FileError:
-                    continue
-            if not registered:
+            ident = sources.message_id(message.get("message_id", ""))
+            sources.host_scope(message, c, ident)
+            records, _ = sources.extract(message, c, ident)
+            if not records:
+                for slot, (name, url) in enumerate(file_links(message.get("processed_plain_text"))):
+                    records.append(sources.attachment(
+                        {"name": name, "url": url, "size": 0}, ident, slot, "text_candidate"
+                    ))
+            if not records:
                 raise FileError("没有可登记的文件附件")
+            check()
+            registered = await self.db("register_many", c, records, ident, check=check)
+            check()
             return {"files": [public(item) for item in registered]}
 
         result = await self.perform(envelope, operation, read=False)
@@ -223,7 +233,38 @@ class FileService:
             ),
         }
 
-    async def list_files(self, envelope, include_group=False, folder_id="", cursor=""):
+    async def message_files(self, c, ident, check, *, follow=True, refresh_url=False):
+        sources.message_id(ident)
+        try:
+            message = await self.ctx.message.get_by_id(ident, chat_id=c["session"])
+        except PermissionError:
+            raise FileError("宿主未授权message.get_by_id，拒绝旧消息取源") from None
+        check()
+        sources.host_scope(message, c, ident)
+        records, reply = sources.extract(message, c, ident)
+        if not records and reply:
+            if not follow or reply == ident:
+                raise FileError("引用超过一跳或指向自身，不继续取源")
+            return await self.message_files(c, reply, check, follow=False, refresh_url=refresh_url)
+        # Only a scope-proven host message can authorize this bounded raw lookup.
+        if refresh_url or not records or any(not item["file_id"] for item in records):
+            raw = await self.api(c, "get_msg", {"message_id": ident})
+            check()
+            sources.adapter_scope(raw, c, ident)
+            records, raw_reply = sources.extract(raw, c, ident, adapter=True)
+            if reply and raw_reply and reply != raw_reply:
+                raise FileError("宿主与QQ引用目标不一致")
+            reply = reply or raw_reply
+        if not records and reply and follow:
+            if reply == ident:
+                raise FileError("消息不能引用自身")
+            return await self.message_files(c, reply, check, follow=False, refresh_url=refresh_url)
+        if not records:
+            raise FileError("消息或一跳引用没有可核实文档附件；不遍历转发/引用链或猜链接")
+        check()
+        return records, ident
+
+    async def list_files(self, envelope, include_group=False, folder_id="", cursor="", message_id=""):
         async def operation(c, check):
             if (
                 type(include_group) is not bool
@@ -233,6 +274,21 @@ class FileService:
                 raise FileError("目录参数无效")
             if not isinstance(cursor, str) or len(cursor) > 128:
                 raise FileError("分页编号无效")
+            if not isinstance(message_id, str):
+                raise FileError("消息ID格式无效")
+            if message_id:
+                if include_group or folder_id or cursor:
+                    raise FileError("message_id与群目录、folder_id、cursor互斥")
+                records, ident = await self.message_files(c, message_id, check)
+                items = await self.db("register_many", c, records, ident, check=check)
+                check()
+                return {
+                    "files": [public(item) for item in items],
+                    "folders": [],
+                    "next_cursor": None,
+                    "source_truncated": False,
+                    "instruction": "仅登记当前聊天原始附件，未下载；最多一跳引用，不是正文。",
+                }
             now = time.monotonic()
             for key, entry in list(self.list_pages.items()):
                 if entry["expires"] <= now:
@@ -268,8 +324,15 @@ class FileService:
                 if not isinstance(source_files, list) or not isinstance(source_folders, list):
                     raise FileError("QQ目录数据格式无效")
                 truncated = len(source_files) > 500 or len(source_folders) > 500
+                records = [
+                    sources.attachment(raw, "catalog", slot, "catalog")
+                    for slot, raw in enumerate(source_files[:500])
+                ]
+                if any(not item["file_id"] for item in records):
+                    raise FileError("群目录缺少稳定平台文件ID")
                 files = [
-                    public(item) for item in await self.db("register_many", c, source_files[:500])
+                    public(item)
+                    for item in await self.db("register_many", c, records, check=check)
                 ]
                 if any(not isinstance(folder, dict) for folder in source_folders[:500]):
                     raise FileError("QQ目录数据格式无效")
@@ -316,12 +379,39 @@ class FileService:
         parsed = self.cache.path(item["ref"], ".parsed.v2.json")
         source = await self.cache.source(item["ref"], ext, limit)
         check()
+        if source is not None and item["size"] and source["bytes"] != item["size"]:
+            raise FileError("完整缓存大小与来源元数据不符，保留现场；请重新提供文件")
         if source is None:
             if item["parent"]:
                 raise FileError("成员缓存过期，请从原压缩包重新读取指定成员")
-            if str(item["file_id"]).startswith(("http://", "https://")):
-                # Message-link registration already carries its direct download url.
-                url = item["file_id"]
+            kind = public(item)["source_kind"]
+            if kind == "text_candidate":
+                stamp = item.get("url_seen")
+                if type(stamp) not in [int, float] or not 0 <= time.time() - stamp <= 600:
+                    raise FileError(
+                        "旧文本候选链接已过期或未核验；请用list(message_id=真实ID)重新取源或重新提供文件"
+                    )
+                url = item.get("url")
+            elif not item["file_id"] or (kind == "message" and item.get("url")):
+                records, ident = await self.message_files(
+                    c, item["message_id"], check, follow=False, refresh_url=True
+                )
+                slot = item.get("source", {}).get("slot")
+                match = next((part for part in records if part["source"]["slot"] == slot), None)
+                if (
+                    not match
+                    or match["file_id"] != item["file_id"]
+                    or match["name"] != item["name"]
+                ):
+                    raise FileError("原附件来源发生变化；请重新list消息，不沿用旧链接")
+                refreshed = await self.db("register", c, match, ident, check=check)
+                check()
+                if refreshed["ref"] != item["ref"]:
+                    raise FileError("原附件身份发生变化")
+                item.update(refreshed)
+                url = item.get("url")
+                if not url:
+                    raise FileError("原消息没有可用的新下载链接；请重新提供文件或显式查询已授权群目录")
             elif c["group"]:
                 resource = await self.api(
                     c,
@@ -335,7 +425,14 @@ class FileService:
                 )
                 url = resource.get("url")
             check()
-            await download(url, raw, limit, item["size"])
+            try:
+                await download(url, raw, limit, item["size"])
+            except FileError:
+                if kind == "text_candidate":
+                    raise FileError(
+                        "未核验文本候选下载失败/链接可能失效；请用真实消息ID重新取源或重新提供文件"
+                    ) from None
+                raise
             check()
             source = await self.cache.commit(item["ref"], ext)
             check()
@@ -365,6 +462,8 @@ class FileService:
         async with self.cache.reserve(
             item["ref"], required, self.config.limits.cache_mib * 1024**2
         ):
+            check()
+            item = await self.db("get", c, ref)
             check()
             document, path, source = await self.document(c, item, check)
             return await action(item, document, path, source)
@@ -464,13 +563,15 @@ class FileService:
                     "register",
                     c,
                     {
-                        "file_id": item["file_id"] + "#member:" + name,
+                        "file_id": (item["file_id"] + "#member:" + name) if item["file_id"] else "",
+                        "source_key": "archive:" + item["ref"] + "#member:" + name,
                         "name": name,
                         "size": entry["size"],
                     },
                     "",
                     item["ref"],
                     name,
+                    check=check,
                 )
                 async with self.cache.pin_member(child["ref"]):
                     check()

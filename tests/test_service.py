@@ -149,7 +149,9 @@ class ServiceTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
         )
         files = await self.service.db("recent", scope())
         self.assertEqual([f["name"] for f in files], ["report.pdf"])
-        self.assertTrue(files[0]["file_id"].startswith("https://ftn.qq.com/"))
+        self.assertEqual(files[0]["file_id"], "")
+        self.assertTrue(files[0]["url"].startswith("https://ftn.qq.com/"))
+        self.assertEqual(files[0]["source"]["kind"], "text_candidate")
 
     async def test_file_links_extracts_only_file_markers_with_urls(self):
         from neko_files.service import file_links

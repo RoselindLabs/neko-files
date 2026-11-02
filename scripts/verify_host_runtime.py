@@ -1,4 +1,4 @@
-"""Actual 1.3.15 Runner activation/RPC/reload/unload against an isolated instance."""
+"""Actual fork Runner activation/RPC/reload/unload against an isolated instance."""
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock
 import argparse
 import asyncio
 import json
+import importlib.metadata
 import os
 import shutil
 import sys
@@ -17,20 +18,21 @@ import sys
 async def verify(args):
     root = Path(__file__).resolve().parents[1]
     args.host_source = args.host_source.resolve()
-    args.report = args.report.resolve()
+    if args.report:
+        args.report = args.report.resolve()
     if args.extra_site_packages:
         args.extra_site_packages = args.extra_site_packages.resolve()
     with ExitStack() as cleanup:
-        directory = cleanup.enter_context(TemporaryDirectory(prefix="files-runner-"))
+        directory = cleanup.enter_context(TemporaryDirectory(prefix="files-runner-", dir=args.temp_dir))
         instance = Path(directory).resolve()
         previous_cwd = Path.cwd()
         os.chdir(instance)
         cleanup.callback(os.chdir, previous_cwd)
         os.environ.update(
-            MAIBOT_INSTANCE_DIR=str(instance), MAIBOT_LOCALE="zh-CN", MAIBOT_HOST_VERSION="1.3.15"
+            MAIBOT_INSTANCE_DIR=str(instance), MAIBOT_LOCALE="zh-CN", MAIBOT_HOST_VERSION=args.host_version
         )
         if args.extra_site_packages:
-            sys.path.insert(0, str(args.extra_site_packages.resolve()))
+            sys.path.append(str(args.extra_site_packages.resolve()))
         sys.path.insert(0, str(args.host_source.resolve()))
         sys.path.insert(0, str(args.host_source.resolve() / "scripts"))
         import neko_pytest_guard  # noqa: F401 -- audit guard, not a pytest invocation
@@ -39,6 +41,7 @@ async def verify(args):
         from src.plugin_runtime import ENV_HOST_VERSION
         from src.plugin_runtime.protocol.envelope import Envelope
         from src.plugin_runtime.component_query import ComponentQueryService
+        from src.plugin_runtime.host.authorization import AuthorizationManager
         from src.common.database.database import engine
         from src.common.logger import close_handlers
 
@@ -51,7 +54,7 @@ async def verify(args):
             .is_relative_to(args.host_source.resolve())
         ), "Do not fall back to another host checkout"
 
-        os.environ[ENV_HOST_VERSION] = "1.3.15"
+        os.environ[ENV_HOST_VERSION] = args.host_version
         assert runner_main._PROJECT_ROOT.resolve() == instance, "Refuse real host paths"
         target = instance / "plugins/neko-files"
         target.mkdir(parents=True)
@@ -71,12 +74,28 @@ async def verify(args):
         )
         registrations = []
         capabilities = []
+        permissions = AuthorizationManager()
+        requested = json.loads((root / "_manifest.json").read_text(encoding="utf-8"))["capabilities"]
+        permissions.register_plugin("neko.files", requested)
 
         async def rpc(method, **kwargs):
             if method == "cap.call":
                 name = kwargs["payload"]["capability"]
                 capabilities.append(name)
-                assert name == "chat.get_all_streams", "No QQ/model/other capability calls allowed"
+                allowed, reason = permissions.check_capability("neko.files", name)
+                if not allowed:
+                    raise PermissionError(reason)
+                assert name in ["chat.get_all_streams", "message.get_by_id"], "No QQ/model capability calls allowed"
+                if name == "message.get_by_id":
+                    query = kwargs["payload"]["args"]
+                    assert query["chat_id"] == "a" and not query["include_binary_data"]
+                    assert query["message_id"] == "1001"
+                    message = {
+                        "message_id": "1001", "session_id": "a", "platform": "qq", "account_id": "789",
+                        "message_info": {"group_info": {"group_id": "123"}, "user_info": {"user_id": "111"}},
+                        "raw_message": [{"type": "file", "data": {"file_id": "raw-synthetic", "name": "raw.txt", "size": "4"}}],
+                    }
+                    return SimpleNamespace(error=None, payload={"result": {"success": True, "message": message}})
                 rows = [
                     {
                         "session_id": sid,
@@ -130,7 +149,7 @@ async def verify(args):
                 metadata=next(t["metadata"] for t in tools if t["name"] == "neko_files_list"),
             )
 
-            async def invoke(sid, group):
+            async def invoke(sid, group, **arguments):
                 context = SimpleNamespace(
                     session_id=sid,
                     stream_id=sid,
@@ -141,7 +160,7 @@ async def verify(args):
                 )
                 payload = ComponentQueryService._build_tool_invocation_payload(
                     entry,
-                    SimpleNamespace(arguments={"_host_context": {"session_id": "forged"}}),
+                    SimpleNamespace(arguments={**arguments, "_host_context": {"session_id": "forged"}}),
                     context,
                 )
                 request = Envelope(
@@ -159,6 +178,13 @@ async def verify(args):
             denied = await invoke("b", "456")
             assert accepted["success"] and accepted["files"][0]["ref"] == record["ref"]
             assert not denied["success"] and record["ref"] not in str(denied)
+            sourced = await invoke("a", "123", message_id="1001")
+            assert sourced["success"] and sourced["files"][0]["source_verified"]
+            assert sourced["files"][0]["size"] == 4
+            permissions.register_plugin("neko.files", [name for name in requested if name != "message.get_by_id"])
+            blocked = await invoke("a", "123", message_id="1001")
+            assert not blocked["success"], "Missing message capability must fail closed"
+            permissions.register_plugin("neko.files", requested)
             for enabled in [False, True]:
                 config = {
                     "plugin": {"enabled": enabled, "config_version": "1.0.0"},
@@ -185,6 +211,9 @@ async def verify(args):
                 "tool_count": 4,
                 "trusted_host_to_runner_rpc": True,
                 "cross_scope_denied": True,
+                "normalized_message_source_and_permission_denial": True,
+                "host_version": args.host_version,
+                "sdk_version": importlib.metadata.version("maibot-plugin-sdk"),
                 "config_reload_disabled_then_enabled": True,
                 "missing_version_rejected": True,
                 "instance_isolated": True,
@@ -196,13 +225,16 @@ async def verify(args):
             await runner._invoke_plugin_on_unload(meta)
             assert not meta.instance.ready
         result["unloaded"] = True
-    args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    if args.report:
+        args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host-source", type=Path, required=True)
+    parser.add_argument("--host-version", default="1.3.15")
+    parser.add_argument("--temp-dir", type=Path)
     parser.add_argument("--extra-site-packages", type=Path)
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--report", type=Path)
     asyncio.run(verify(parser.parse_args()))
