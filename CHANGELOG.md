@@ -1,5 +1,6 @@
 # 0.3.3 SnowLuma original group file IDs
 
+- Authorized standard hot reload completed on 2026-11-03 at business source 826cd44672914a016a19cec0b3d8e6f031baa3a8 after exact-SHA core/package/gates. One scoped small-TXT maintenance download/parser check succeeded on official SnowLuma 2.4.0; no OCR/model/QQ send probe or blanket natural-format acceptance.
 - Accept only slash-prefixed canonical hex UUIDs in verified group catalog/notice/message sources; keep path/private-scope refusal and existing authorization.
 - Preserve opaque IDs and old references without substitution; no local-path reading or get_file/search fallback.
 
