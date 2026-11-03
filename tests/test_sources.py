@@ -41,6 +41,7 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
                     "message": [{"type": "file", "data": {
                         "name": "one.txt", "size": "9", "file_id": "platform1"}}]}
         self.login = "789"
+        self.file_url = "https://example.invalid/resolved"
         self.allow_message = True
         self.entered = self.release = None
 
@@ -72,6 +73,8 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
                     result = {"user_id": self.login}
                 elif action == "get_msg":
                     result = copy.deepcopy(self.raw)
+                elif action in ["get_group_file_url", "get_private_file_url"]:
+                    result = {"url": self.file_url}
                 else:
                     raise AssertionError("No download/model/catalog action allowed")
                 return {"success": True, "result": {"status": "ok", "data": result}}
@@ -217,7 +220,8 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
             return await original(method, plugin_id, payload, **kwargs)
 
         self.ctx._rpc_call = private_rpc
-        env = envelope('p', ''); env['user_id'] = '111'
+        env = envelope('p', '')
+        env['user_id'] = '111'
         listed = await self.service.list_files(env, message_id='1001')
         self.assertTrue(listed['success'], listed)
         self.assertNotIn('OPAQUE_PRIVATE_HASH', str(listed))
@@ -248,6 +252,134 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         saved = await self.service.db('get', scope(), item['ref'])
         self.assertEqual(saved['file_hash'], 'original-hash')
         self.assertFalse(await self.service.db('admit_ocr', scope(), item['ref'], 1))
+
+    async def test_group_busid_missing_zero_and_real_value_use_platform_default_correctly(self):
+        for index, busid in enumerate([None, 0, 102]):
+            with self.subTest(busid=busid):
+                data = self.messages["1001"]["raw_message"][0]["data"]
+                data["file_id"] = f"platform-{index}"
+                data.pop("busid", None)
+                if busid is not None:
+                    data["busid"] = busid
+                listed = await self.lookup()
+                self.assertTrue(listed["success"], listed)
+                self.calls.clear()
+
+                async def download(url, destination, limit, expected):
+                    self.assertEqual(url, self.file_url)
+                    destination.write_bytes(b"synthetic")
+
+                with patch.object(module, "download", side_effect=download), patch.object(
+                    module, "worker", return_value={"kind": "lines", "units": []}
+                ):
+                    result = await self.service.read(envelope(), listed["files"][0]["ref"])
+                self.assertTrue(result["success"], result)
+                actions = [args["args"] for cap, args in self.calls if cap == "api.call"]
+                requested = next(a["params"] for a in actions if a["action_name"] == "get_group_file_url")
+                self.assertEqual(requested, {"group_id": "123", "file_id": f"platform-{index}",
+                                             **({"busid": busid} if busid else {})})
+
+    async def test_private_url_message_refresh_uses_hash_and_file_action_not_stored_url(self):
+        self.config.access.user_ids = ["111"]
+        current = host_message(session_id="p", message_info={
+            "group_info": None, "user_info": {"user_id": "111"}})
+        current["raw_message"][0]["data"]["url"] = "https://example.invalid/expired"
+        original = self.ctx._rpc_call
+        actions = []
+
+        async def rpc(method, plugin_id, payload, **kwargs):
+            cap, args = payload["capability"], payload["args"]
+            if cap == "message.get_by_id":
+                self.assertEqual(args["chat_id"], "p")
+                return {"success": True, "message": copy.deepcopy(current)}
+            if cap == "api.call":
+                action = args["args"]["action_name"]
+                actions.append(action)
+                if action == "get_msg":
+                    data = {**current["raw_message"][0]["data"], "file_hash": "SYNTHETIC_HASH"}
+                    return {"success": True, "result": {"status": "ok", "data": {
+                        "message_id": 1001, "message_type": "private", "sender": {"user_id": 111},
+                        "message": [{"type": "file", "data": data}]}}}
+                if action == "get_private_file_url":
+                    self.assertEqual(args["args"]["params"], {"user_id": "111", "file_id": "platform1",
+                                                            "file_hash": "SYNTHETIC_HASH"})
+                    return {"success": True, "result": {"status": "ok", "data": {"url": self.file_url}}}
+            return await original(method, plugin_id, payload, **kwargs)
+
+        self.ctx._rpc_call = rpc
+        env = envelope("p", "")
+        env["user_id"] = "111"
+        listed = await self.service.list_files(env, message_id="1001")
+        self.assertTrue(listed["success"], listed)
+
+        async def download(url, destination, limit, expected):
+            self.assertEqual(url, self.file_url)
+            destination.write_bytes(b"synthetic")
+
+        with patch.object(module, "download", side_effect=download), patch.object(
+            module, "worker", return_value={"kind": "lines", "units": []}
+        ):
+            result = await self.service.read(env, listed["files"][0]["ref"])
+        self.assertTrue(result["success"], result)
+        self.assertEqual(actions.count("get_msg"), 1)
+        self.assertEqual(actions[-1], "get_private_file_url")
+        self.assertNotIn("SYNTHETIC_HASH", json.dumps(result))
+
+    async def test_url_refresh_without_busid_preserves_previously_verified_real_busid(self):
+        self.messages["1001"]["raw_message"][0]["data"].update(
+            busid=102, url="https://example.invalid/expired")
+        ref = (await self.lookup())["files"][0]["ref"]
+        # SnowLuma get_msg ordinary file data has no busid even when a previous
+        # scope-proven catalog/notice registration had the real value.
+        self.raw["message"][0]["data"]["url"] = "https://example.invalid/expired"
+        self.calls.clear()
+
+        async def download(url, destination, limit, expected):
+            self.assertEqual(url, self.file_url)
+            destination.write_bytes(b"synthetic")
+
+        with patch.object(module, "download", side_effect=download), patch.object(
+            module, "worker", return_value={"kind": "lines", "units": []}
+        ):
+            result = await self.service.read(envelope(), ref)
+        self.assertTrue(result["success"], result)
+        actions = [args["args"] for cap, args in self.calls if cap == "api.call"]
+        requested = next(a["params"] for a in actions if a["action_name"] == "get_group_file_url")
+        self.assertEqual(requested["busid"], 102)
+        self.assertEqual((await self.service.db("get", scope(), ref))["busid"], 102)
+
+    async def test_stable_url_refresh_hash_conflict_refuses_before_url_action(self):
+        data = self.messages["1001"]["raw_message"][0]["data"]
+        data.update(url="https://example.invalid/expired", file_hash="original-hash")
+        ref = (await self.lookup())["files"][0]["ref"]
+        before = await self.service.db("get", scope(), ref)
+        self.raw["message"][0]["data"].update(file_hash="changed-hash")
+        self.calls.clear()
+        with patch.object(module, "download") as download:
+            result = await self.service.read(envelope(), ref)
+        self.assertFalse(result["success"])
+        self.assertIn("校验来源发生变化", result["content"])
+        self.assertEqual(await self.service.db("get", scope(), ref), before)
+        actions = [a["args"]["action_name"] for cap, a in self.calls if cap == "api.call"]
+        self.assertNotIn("get_group_file_url", actions)
+        download.assert_not_awaited()
+
+    async def test_url_action_revoke_blocks_download_without_bypassing_check(self):
+        ref = (await self.lookup())["files"][0]["ref"]
+        original = self.ctx._rpc_call
+
+        async def rpc(method, plugin_id, payload, **kwargs):
+            result = await original(method, plugin_id, payload, **kwargs)
+            if (payload["capability"] == "api.call"
+                    and payload["args"]["args"]["action_name"] == "get_group_file_url"):
+                self.config.access.group_ids = []
+            return result
+
+        self.ctx._rpc_call = rpc
+        with patch.object(module, "download") as download:
+            result = await self.service.read(envelope(), ref)
+        self.assertFalse(result["success"])
+        download.assert_not_awaited()
 
     async def test_message_scope_fields_and_private_account_deny(self):
         for changes in [{"message_id": "wrong"}, {"session_id": "b"}, {"platform": "other"},
@@ -473,7 +605,7 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         async def synthetic_download(url, destination, limit, expected):
-            self.assertEqual(url, "https://example.invalid/new-signed")
+            self.assertEqual(url, self.file_url)
             destination.write_bytes(b"synthetic")
 
         with patch.object(module, "download", side_effect=synthetic_download), patch.object(
@@ -484,6 +616,43 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         stored = await self.service.db("get", scope(), ref)
         self.assertEqual(stored["file_id"], "platform1")
         self.assertEqual(stored["url"], "https://example.invalid/new-signed")
+
+    async def test_url_only_same_old_link_cannot_renew_age_via_list_or_get_msg(self):
+        data = {"name": "one.txt", "size": "9", "url": "https://example.invalid/old"}
+        self.messages["1001"]["raw_message"][0]["data"] = copy.deepcopy(data)
+        self.raw["message"][0]["data"] = copy.deepcopy(data)
+        ref = (await self.lookup())["files"][0]["ref"]
+        for age in [time.time() - 601, None]:
+            with self.service.store.connect() as con:
+                item = json.loads(con.execute("SELECT data FROM files WHERE id=?", (ref,)).fetchone()[0])
+                item["url_seen"] = age
+                con.execute("UPDATE files SET data=? WHERE id=?", (json.dumps(item), ref))
+            self.assertTrue((await self.lookup())["success"])
+            with patch.object(module, "download") as download:
+                result = await self.service.read(envelope(), ref)
+            self.assertFalse(result["success"])
+            self.assertIn("旧链接", result["content"])
+            self.assertEqual((await self.service.db("get", scope(), ref))["url_seen"], age)
+            download.assert_not_awaited()
+
+    async def test_url_only_refresh_scope_slot_and_name_changes_fail_without_download(self):
+        data = {"name": "one.txt", "size": "9", "url": "https://example.invalid/source"}
+        self.messages["1001"]["raw_message"][0]["data"] = copy.deepcopy(data)
+        self.raw["message"][0]["data"] = copy.deepcopy(data)
+        ref = (await self.lookup())["files"][0]["ref"]
+        original = copy.deepcopy(self.raw)
+        for mutation in ("group", "slot", "name"):
+            self.raw = copy.deepcopy(original)
+            if mutation == "group":
+                self.raw["group_id"] = 456
+            elif mutation == "slot":
+                self.raw["message"] = []
+            else:
+                self.raw["message"][0]["data"]["name"] = "changed.txt"
+            with patch.object(module, "download") as download:
+                result = await self.service.read(envelope(), ref)
+            self.assertFalse(result["success"], result)
+            download.assert_not_awaited()
 
     async def test_candidate_cannot_poison_verified_url_only_cache_identity(self):
         message = host_message(raw_message=[], processed_plain_text=(

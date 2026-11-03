@@ -1,3 +1,10 @@
+# 0.3.4 SnowLuma scoped attachment locator repair
+
+- Omit missing/unknown-zero group busid rather than overriding the protocol default; preserve real nonzero values without guessing 102.
+- Scope/identity-verified message sources with stable file IDs resolve fresh group/private URLs through file actions even when get_msg retains an old URL; preserve private hash verification and conflict refusal.
+- URL-only sources retain exact message/slot/identity checks and a ten-minute observation bound; repeated observations of the same URL do not renew its age, including legacy unknown-age records.
+- No schema/configuration/permission changes, new format/local-path fallback, cleared cache/unknown ledger, or real QQ/download/model acceptance. Local source preparation is not a production rollout.
+
 # 0.3.3 SnowLuma original group file IDs
 
 - Authorized standard hot reload completed on 2026-11-03 at business source 826cd44672914a016a19cec0b3d8e6f031baa3a8 after exact-SHA core/package/gates. One scoped small-TXT maintenance download/parser check succeeded on official SnowLuma 2.4.0; no OCR/model/QQ send probe or blanket natural-format acceptance.

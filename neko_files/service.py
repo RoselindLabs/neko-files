@@ -420,48 +420,61 @@ class FileService:
                         "旧文本候选链接已过期或未核验；请用list(message_id=真实ID)重新取源或重新提供文件"
                     )
                 url = item.get("url")
-            elif not item["file_id"] or (kind == "message" and item.get("url")):
-                records, ident = await self.message_files(
-                    c, item["message_id"], check, follow=False, refresh_url=True
-                )
-                slot = item.get("source", {}).get("slot")
-                match = next((part for part in records if part["source"]["slot"] == slot), None)
-                if (
-                    not match
-                    or match["file_id"] != item["file_id"]
-                    or match["name"] != item["name"]
-                ):
-                    raise FileError("原附件来源发生变化；请重新list消息，不沿用旧链接")
-                refreshed = await self.db("register", c, match, ident, check=check)
-                check()
-                if refreshed["ref"] != item["ref"]:
-                    raise FileError("原附件身份发生变化")
-                item.update(refreshed)
-                url = item.get("url")
-                if not url:
-                    raise FileError("原消息没有可用的新下载链接；请重新提供文件或显式查询已授权群目录")
-            elif c["group"]:
-                resource = await self.api(
-                    c,
-                    "get_group_file_url",
-                    {"group_id": c["group"], "file_id": item["file_id"], "busid": item["busid"]},
-                )
-                url = resource.get("url")
             else:
-                if kind == 'message' and item.get('message_id') and not item.get('file_hash'):
-                    records, ident = await self.message_files(c, item['message_id'], check,
-                                                              follow=False, refresh_url=True)
-                    slot = item.get('source', {}).get('slot')
-                    match = next((part for part in records if part['source']['slot'] == slot), None)
-                    if not match or match['file_id'] != item['file_id'] or match['name'] != item['name']:
-                        raise FileError('原私聊附件身份发生变化；请重新list，不猜文件或沿用旧协议ID')
-                    item.update(await self.db('register', c, match, ident, check=check))
+                refreshed_source = False
+                if not item["file_id"] or (kind == "message" and item.get("url")):
+                    records, ident = await self.message_files(
+                        c, item["message_id"], check, follow=False, refresh_url=True
+                    )
+                    slot = item.get("source", {}).get("slot")
+                    match = next((part for part in records if part["source"]["slot"] == slot), None)
+                    if (
+                        not match
+                        or match["file_id"] != item["file_id"]
+                        or match["name"] != item["name"]
+                    ):
+                        raise FileError("原附件来源发生变化；请重新list消息，不沿用旧链接")
+                    refreshed = await self.db("register", c, match, ident, check=check)
                     check()
-                resource = await self.api(
-                    c, "get_private_file_url", {"user_id": c["user"], "file_id": item["file_id"],
-                        **({'file_hash': item['file_hash']} if item.get('file_hash') else {})}
-                )
-                url = resource.get("url")
+                    if refreshed["ref"] != item["ref"]:
+                        raise FileError("原附件身份发生变化")
+                    item.update(refreshed)
+                    refreshed_source = True
+                if not item["file_id"]:
+                    # get_msg does not promise to re-sign file URLs. Re-observing
+                    # the same URL must not renew its bounded observation age.
+                    stamp = item.get("url_seen")
+                    if type(stamp) not in [int, float] or not 0 <= time.time() - stamp <= 600:
+                        raise FileError("原消息仍为旧链接或时效无法核实；请重新提供文件")
+                    url = item.get("url")
+                    if not url:
+                        raise FileError("原消息没有可用的新下载链接；请重新提供文件或显式查询已授权群目录")
+                elif c["group"]:
+                    resource = await self.api(
+                        c,
+                        "get_group_file_url",
+                        {"group_id": c["group"], "file_id": item["file_id"],
+                         **({"busid": item["busid"]} if item["busid"] else {})},
+                    )
+                    url = resource.get("url")
+                else:
+                    if (not refreshed_source and kind == 'message'
+                            and item.get('message_id') and not item.get('file_hash')):
+                        records, ident = await self.message_files(c, item['message_id'], check,
+                                                                  follow=False, refresh_url=True)
+                        slot = item.get('source', {}).get('slot')
+                        match = next((part for part in records if part['source']['slot'] == slot), None)
+                        if not match or match['file_id'] != item['file_id'] or match['name'] != item['name']:
+                            raise FileError('原私聊附件身份发生变化；请重新list，不猜文件或沿用旧协议ID')
+                        item.update(await self.db('register', c, match, ident, check=check))
+                        check()
+                    # A stable platform ID always uses its file URL action;
+                    # a stored get_msg URL is not evidence of a fresh locator.
+                    resource = await self.api(
+                        c, "get_private_file_url", {"user_id": c["user"], "file_id": item["file_id"],
+                            **({'file_hash': item['file_hash']} if item.get('file_hash') else {})}
+                    )
+                    url = resource.get("url")
             check()
             try:
                 await download(url, raw, limit, item["size"])

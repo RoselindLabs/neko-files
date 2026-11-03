@@ -101,9 +101,15 @@ class Store:
                 raise FileError("同一资源元数据发生变化，保留缓存；请单独重新提供文件")
             if not item["size"]:
                 item["size"] = previous["size"]
+            # Missing/zero means unknown, not a change to the real business ID.
+            item['busid'] = item['busid'] or previous.get('busid', 0)
             if previous.get('file_hash') and item['file_hash'] and previous['file_hash'] != item['file_hash']:
                 raise FileError('同一文件校验来源发生变化，保留缓存和账本')
             item['file_hash'] = item['file_hash'] or previous.get('file_hash', '')
+            if not item['file_id'] and item.get('url') == previous.get('url'):
+                # A repeated get_msg/list observation is not URL renewal.
+                # Keep unknown legacy age unknown instead of blessing it now.
+                item['url_seen'] = previous.get('url_seen')
             # Fresh scope-proven registration may update URL/provenance, never extend 7-day TTL.
             con.execute("UPDATE files SET data=? WHERE id=?", (json.dumps(item), ref))
         elif not old:

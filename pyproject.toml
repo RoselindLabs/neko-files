@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "neko-files-local"
-version = "0.3.3"
+version = "0.3.4"
 description = "Local repair workspace for a scoped QQ document reader"
 requires-python = ">=3.12"
 dependencies = [
