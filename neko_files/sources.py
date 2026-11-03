@@ -67,7 +67,7 @@ def adapter_scope(message, c, ident):
         raise FileError("QQ原始消息缺少当前群/私聊目标证明")
 
 
-def attachment(raw, ident, slot, kind="message"):
+def attachment(raw, ident, slot, kind="message", *, group_file=False):
     if not isinstance(raw, dict):
         raise FileError("附件结构无效")
     name = raw.get("name") or raw.get("file_name") or raw.get("file")
@@ -89,7 +89,12 @@ def attachment(raw, ident, slot, kind="message"):
             raise FileError("附件链接过长")
     if not file_id and not url:
         raise FileError("附件没有可核实资源；不接受本地路径/base64/官方file_ref")
-    if file_id.startswith(("file:", "/", "\\")):
+    # SnowLuma exposes QQ's original slash-prefixed UUID. It is not a path:
+    # only admit the exact 36-character UUID shape in an already-proven group.
+    group_uuid = (group_file or kind in ['catalog', 'notice']) and re.fullmatch(
+        r'/[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', file_id
+    )
+    if file_id.startswith(("file:", "/", "\\")) and not group_uuid:
         raise FileError("附件资源不能为本地路径")
     file_hash = raw.get('file_hash', '')
     if not isinstance(file_hash, str) or len(file_hash) > 1024 or any(ord(ch) < 33 for ch in file_hash):
@@ -139,7 +144,7 @@ def extract(message, c, ident, adapter=False):
         if segment.get("type") == "file":
             if len(records) >= 8:
                 raise FileError("单条消息附件超过8个，请单独提供")
-            records.append(attachment(data, ident, len(records)))
+            records.append(attachment(data, ident, len(records), group_file=bool(c['group'])))
         elif segment.get("type") == "reply":
             if not isinstance(data, dict):
                 raise FileError("引用结构无效")

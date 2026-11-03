@@ -174,6 +174,23 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((await self.lookup(**args))["success"])
         self.assertTrue(all(cap == "chat.get_all_streams" for cap, _ in self.calls))
 
+    async def test_snowluma_group_uuid_is_not_a_local_path_or_private_file_id(self):
+        ident='/12345678-1234-5678-9abc-1234567890ab'
+        raw={'file_id':ident,'name':'one.txt','size':9}
+        self.assertEqual(sources.attachment(raw,'catalog',0,'catalog')['file_id'],ident)
+        self.assertEqual(sources.attachment(raw,'1001',0,group_file=True)['file_id'],ident)
+        with self.assertRaises(FileError):
+            sources.attachment(raw,'1001',0)
+        for invalid in ['/etc/shadow',ident+'/../secret',ident+'.txt',ident+'/',
+                        '/12345678-1234-5678-9abc-1234567890az','file:'+ident,'\\'+ident[1:]]:
+            with self.assertRaises(FileError):
+                sources.attachment({**raw,'file_id':invalid},'catalog',0,'catalog')
+        self.messages['1001']['raw_message'][0]['data']['file_id']=ident
+        result=await self.lookup()
+        self.assertTrue(result['success'],result)
+        self.assertTrue(result['files'][0]['source_verified'])
+        self.assertNotIn(ident,str(result))
+
     async def test_snowluma_private_hash_survives_registration_and_is_not_model_visible(self):
         self.config.access.user_ids = ['111']
         original = self.ctx._rpc_call

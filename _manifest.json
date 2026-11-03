@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "neko.files",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "name": "Neko Files",
   "description": "按需读取授权QQ文档及单个压缩包成员；默认关闭，须配套可信上下文fork。",
   "author": {"name": "NekoLaska", "url": "https://github.com/znzsofficial"},

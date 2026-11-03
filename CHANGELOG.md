@@ -1,3 +1,8 @@
+# 0.3.3 SnowLuma original group file IDs
+
+- Accept only slash-prefixed canonical hex UUIDs in verified group catalog/notice/message sources; keep path/private-scope refusal and existing authorization.
+- Preserve opaque IDs and old references without substitution; no local-path reading or get_file/search fallback.
+
 # 0.3.2 SnowLuma private-file compatibility
 
 - Preserve bounded structured attachment file_hash privately and pass it to private URL resolution when present.
