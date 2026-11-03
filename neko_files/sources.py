@@ -91,6 +91,9 @@ def attachment(raw, ident, slot, kind="message"):
         raise FileError("附件没有可核实资源；不接受本地路径/base64/官方file_ref")
     if file_id.startswith(("file:", "/", "\\")):
         raise FileError("附件资源不能为本地路径")
+    file_hash = raw.get('file_hash', '')
+    if not isinstance(file_hash, str) or len(file_hash) > 1024 or any(ord(ch) < 33 for ch in file_hash):
+        raise FileError('附件校验元数据无效')
     return {
         "file_id": file_id,
         "name": name,
@@ -100,6 +103,7 @@ def attachment(raw, ident, slot, kind="message"):
         "size": bounded_int(raw.get("size", raw.get("file_size", 0)),
                             2**63 - 1 if kind == 'catalog' else 40 * 1024**2),
         "busid": bounded_int(raw.get("busid", 0), 2**31 - 1),
+        "file_hash": file_hash,
         "url": url,
         "source": {"kind": kind, "slot": slot},
         "source_key": ("candidate:" if kind == "text_candidate" else "message:") + ident + ":" + str(slot),

@@ -174,6 +174,64 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((await self.lookup(**args))["success"])
         self.assertTrue(all(cap == "chat.get_all_streams" for cap, _ in self.calls))
 
+    async def test_snowluma_private_hash_survives_registration_and_is_not_model_visible(self):
+        self.config.access.user_ids = ['111']
+        original = self.ctx._rpc_call
+        message = host_message(session_id='p', message_info={'group_info': None, 'user_info': {'user_id': '111'}})
+        message['raw_message'][0]['data']['file_hash'] = 'OPAQUE_PRIVATE_HASH'
+        actions = []
+
+        async def private_rpc(method, plugin_id, payload, **kwargs):
+            cap, args = payload['capability'], payload['args']
+            if cap == 'message.get_by_id':
+                self.assertEqual(args['chat_id'], 'p')
+                return {'success': True, 'message': copy.deepcopy(message)}
+            if cap == 'api.call':
+                action = args['args']['action_name']
+                actions.append(action)
+                if action == 'get_private_file_url':
+                    self.assertEqual(args['args']['params'], {'user_id':'111', 'file_id':'platform1',
+                                                             'file_hash':'OPAQUE_PRIVATE_HASH'})
+                    return {'success': True, 'result': {'status':'ok', 'data':{'url':'https://example.invalid/private'}}}
+                if action == 'get_msg':
+                    detail = {'message_id':1001, 'message_type':'private', 'sender':{'user_id':111},
+                              'message':[{'type':'file','data':copy.deepcopy(message['raw_message'][0]['data'])}]}
+                    return {'success':True, 'result':{'status':'ok','data':detail}}
+            return await original(method, plugin_id, payload, **kwargs)
+
+        self.ctx._rpc_call = private_rpc
+        env = envelope('p', ''); env['user_id'] = '111'
+        listed = await self.service.list_files(env, message_id='1001')
+        self.assertTrue(listed['success'], listed)
+        self.assertNotIn('OPAQUE_PRIVATE_HASH', str(listed))
+
+        async def synthetic_download(url, destination, limit, expected):
+            self.assertEqual(url, 'https://example.invalid/private')
+            destination.write_bytes(b'synthetic')
+
+        with patch.object(module, 'download', side_effect=synthetic_download), patch.object(
+            module, 'worker', return_value={'kind':'lines','units':[{'label':'1','text':'synthetic'}]}
+        ):
+            read = await self.service.read(env, listed['files'][0]['ref'])
+        self.assertTrue(read['success'], read)
+        self.assertNotIn('OPAQUE_PRIVATE_HASH', str(read))
+        self.assertNotIn('get_msg', actions)
+
+    async def test_file_hash_conflicts_and_malformed_values_preserve_old_registry(self):
+        raw = host_message()['raw_message'][0]['data']
+        for bad in [True, False, None, 'x'*1025, 'bad hash', 'bad\nhash']:
+            with self.assertRaises(FileError):
+                sources.attachment({**raw, 'file_hash':bad}, '1001', 0)
+        source = sources.attachment({**raw, 'file_hash':'original-hash'}, '1001', 0)
+        item = await self.service.db('register', scope(), source, '1001')
+        self.assertTrue(await self.service.db('admit_ocr', scope(), item['ref'], 1))
+        changed = {**source, 'file_hash':'changed-hash'}
+        with self.assertRaises(FileError):
+            await self.service.db('register', scope(), changed, '1001')
+        saved = await self.service.db('get', scope(), item['ref'])
+        self.assertEqual(saved['file_hash'], 'original-hash')
+        self.assertFalse(await self.service.db('admit_ocr', scope(), item['ref'], 1))
+
     async def test_message_scope_fields_and_private_account_deny(self):
         for changes in [{"message_id": "wrong"}, {"session_id": "b"}, {"platform": "other"},
                         {"account_id": "987"}, {"account_id": ""},

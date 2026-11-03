@@ -448,8 +448,18 @@ class FileService:
                 )
                 url = resource.get("url")
             else:
+                if kind == 'message' and item.get('message_id') and not item.get('file_hash'):
+                    records, ident = await self.message_files(c, item['message_id'], check,
+                                                              follow=False, refresh_url=True)
+                    slot = item.get('source', {}).get('slot')
+                    match = next((part for part in records if part['source']['slot'] == slot), None)
+                    if not match or match['file_id'] != item['file_id'] or match['name'] != item['name']:
+                        raise FileError('原私聊附件身份发生变化；请重新list，不猜文件或沿用旧协议ID')
+                    item.update(await self.db('register', c, match, ident, check=check))
+                    check()
                 resource = await self.api(
-                    c, "get_private_file_url", {"user_id": c["user"], "file_id": item["file_id"]}
+                    c, "get_private_file_url", {"user_id": c["user"], "file_id": item["file_id"],
+                        **({'file_hash': item['file_hash']} if item.get('file_hash') else {})}
                 )
                 url = resource.get("url")
             check()

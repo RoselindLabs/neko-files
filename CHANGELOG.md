@@ -1,3 +1,9 @@
+# 0.3.2 SnowLuma private-file compatibility
+
+- Preserve bounded structured attachment file_hash privately and pass it to private URL resolution when present.
+- Revalidate a hash-missing original private message once, without replacing its file identity; reject changed hashes and preserve TTL/cache/OCR attempts.
+- No local-path/get_file fallback, new configuration or permissions, OCR calls, or changes to the public-distribution hold.
+
 # 0.2.3 local repair
 
 - Tool hints: move the operation-critical semantics out of `detailed_description` (which this host never sends to the model) into the model-visible briefs and parameter descriptions — pagination starts at 1, OCR is explicit single-page and admin-gated, cursors are for continuation, archive members must match the inspected listing.
