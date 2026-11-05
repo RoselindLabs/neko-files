@@ -11,6 +11,5 @@
 - Tests use synthetic inputs/fake adapters/models. A real isolated host Runner must reach
   business activation and unload; manager-only/config-error registration is failure.
 - Windows helpers can exercise parser functions; actual parser subprocess limits require Linux.
-- Keep source provenance/license review explicit; do not publish legacy MIT/GPL-derived material
-  under a guessed license. Preserve original notices until provenance is resolved.
+- Source provenance/license review: Arale provenance confirmed as MIT per author authorization in 2026-11; public distribution hold lifted under standard MIT License. Preserve original notices and attributions.
 - Use uv, unittest and Ruff. No fixed total count as admission; critical groups must execute.
