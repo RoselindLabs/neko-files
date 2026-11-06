@@ -143,10 +143,8 @@ class ServiceTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
         }
         self.ctx.api.call.return_value = {"status": "ok", "data": {"user_id": "789"}}
         result = await self.service.receive(message, {})
-        self.assertIn(
-            "[Neko Files 文件索引]",
-            result["modified_kwargs"]["message"]["processed_plain_text"],
-        )
+        self.assertEqual(result, {"action": "continue"})
+        self.assertNotIn("Neko Files", message["processed_plain_text"])
         files = await self.service.db("recent", scope())
         self.assertEqual([f["name"] for f in files], ["report.pdf"])
         self.assertEqual(files[0]["file_id"], "")
@@ -184,7 +182,7 @@ class ServiceTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
         }
         self.ctx.api.call.return_value = {"status": "ok", "data": {"user_id": "789"}}
         result = await self.service.receive(message, {})
-        self.assertTrue(result["modified_kwargs"])
+        self.assertEqual(result, {"action": "continue"})
         files = await self.service.db("recent", scope())
         self.assertEqual([f["name"] for f in files], ["up.zip"])
 

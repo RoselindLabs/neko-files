@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import asyncio
 import json
+import os
 import sys
 
 from .authorization import FileError
@@ -44,6 +45,10 @@ async def worker(path: Path, ext: str, operation: str = "parse", **options) -> d
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
+            # Do not pass provider tokens, proxy credentials or arbitrary app
+            # configuration to document parsers. This is not an OS sandbox.
+            env={key: value for key, value in os.environ.items()
+                 if key in {"SYSTEMROOT", "SystemRoot", "WINDIR", "LANG", "LC_ALL", "TZ"}},
         )
     )
     process = None

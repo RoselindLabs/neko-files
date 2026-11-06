@@ -195,8 +195,16 @@ def main():
         resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
         resource.setrlimit(resource.RLIMIT_FSIZE, (40 * 1024**2, 40 * 1024**2))
         resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     except ImportError:
         raise SystemExit("Production parser requires Linux resource limits") from None
+    def deny_external(event, args):
+        if event in {"socket.connect", "socket.bind", "socket.getaddrinfo",
+                     "subprocess.Popen", "os.system", "os.posix_spawn"}:
+            raise PermissionError("Parser external IO is disabled")
+
+    # Python-level accident prevention, not protection against native-code exploits.
+    sys.addaudithook(deny_external)
     try:
         path, ext, operation = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 40 * 1024**2:

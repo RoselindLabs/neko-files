@@ -36,14 +36,16 @@ def window(document, start=1, end=0, sheet="", keyword="", offset=0, limit=8000,
     if last > len(units) or (units and start > len(units)):
         raise FileError("请求范围超过当前已解析单位，请先查看结构")
     if keyword:
-        matches = [i for i, u in enumerate(units) if keyword.casefold() in u["text"].casefold()]
+        search_end = end or len(units)
+        matches = [i for i in range(start - 1, search_end)
+                   if keyword.casefold() in units[i]["text"].casefold()]
         if match_offset > len(matches):
             raise FileError("匹配偏移超过命中数量")
         indices = sorted(
             {
                 j
                 for i in matches[match_offset : match_offset + 20]
-                for j in range(max(0, i - 1), min(len(units), i + 2))
+                for j in range(max(start - 1, i - 1), min(search_end, i + 2))
             }
         )
         selected = [units[i] for i in indices]

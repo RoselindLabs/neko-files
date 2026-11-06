@@ -136,7 +136,8 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["success"], result)
         ref = result["files"][0]["ref"]
         received = await self.service.receive(host_message(), {})
-        self.assertIn(ref, str(received))
+        self.assertEqual(received, {"action": "continue"})
+        self.assertEqual((await self.service.db("recent", scope()))[0]["ref"], ref)
         self.assertEqual(len(await self.service.db("recent", scope())), 1)
 
     async def test_private_sources_require_separate_grant_and_target_proof(self):
@@ -575,11 +576,13 @@ class SourceTests(unittest.IsolatedAsyncioTestCase):
         message = host_message(raw_message=[], processed_plain_text=(
             "[文件] candidate.txt，大小: 9，链接: https://example.invalid/synthetic"))
         result = await self.service.receive(message, {})
-        self.assertIn("modified_kwargs", result)
+        self.assertEqual(result, {"action": "continue"})
         item = (await self.service.db("recent", scope()))[0]
         self.assertEqual(item["file_id"], "")
         self.assertEqual(item["source"]["kind"], "text_candidate")
-        self.assertNotIn("https://", result["modified_kwargs"]["message"]["processed_plain_text"].split("文件索引]")[1])
+        listed = await self.service.list_files(envelope())
+        self.assertNotIn("https://", listed["content"])
+        self.assertFalse(listed["files"][0]["source_verified"])
         with self.service.store.connect() as con:
             item["url_seen"] = time.time() - 601
             con.execute("UPDATE files SET data=? WHERE id=?", (json.dumps(item), item["ref"]))

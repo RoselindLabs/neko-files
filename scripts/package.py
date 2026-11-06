@@ -42,7 +42,7 @@ FILES = (
 def build(output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    target = output / "neko-files-0.3.4-local.zip"
+    target = output / "neko-files-0.4.0-local.zip"
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name in FILES:
             path = ROOT / name

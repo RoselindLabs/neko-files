@@ -1,3 +1,13 @@
+# 0.4.0 Scoped reader reliability and model contracts
+
+- Preserve every OCR admission (including legacy unknown outcomes) independently of the one-hour success cache. At 256 admissions fail closed; time, reload and eviction never authorize another request. No ledger deletion or schema rewrite.
+- Consume directory cursors atomically without extending their five-minute scope-bound lifetime. Archive inspection is paged within a 6000-character entry budget, preserving complete member names.
+- Put structured evidence into Host-consumed content; expose OCR and two-level keyword continuation in actual SDK descriptions and return bounded next_call hints. Keyword search and neighboring context respect the requested range.
+- Index attachments without modifying user message text. The scoped list tool is the explicit discovery route; no Host patch or fabricated reference injection.
+- Classify known backend failures through error/wording without disclosing raw responses. Parser children receive a minimal environment, no core dumps, and Python-level network/process guards; this is not a native-code/filesystem sandbox.
+- Rollback warning: 0.3.4 and earlier automatically delete old OCR attempts. Never run those readers against this ledger or restore stale data; use a compatibility-patched rollback retaining permanent admissions. Existing legacy rows are conservatively treated as unresolved, not replayed.
+- No production deployment/configuration, real QQ/download/OCR probes, or expanded permissions.
+
 # 0.3.4 SnowLuma scoped attachment locator repair
 
 - Omit missing/unknown-zero group busid rather than overriding the protocol default; preserve real nonzero values without guessing 102.

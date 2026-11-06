@@ -54,7 +54,7 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_list",
-        brief_description="列当前聊天/群目录索引；根目录省略folder_id，子目录用返回编号；失败/未读完不等于没有文件。",
+        brief_description="找聊天中的文件先调用本工具取得ref，再用inspect/read的file_ref读取。可查群目录；根目录省略folder_id。失败/未读完不等于没有文件。",
         detailed_description="只返回索引，不下载。include_group仅用于明确查询且管理员开启的当前群目录。next_cursor续读5分钟作用域快照；来源超限会标记source_truncated。",
         parameters=[
             param("include_group", "查询当前群目录", ToolParamType.BOOLEAN),
@@ -75,13 +75,14 @@ class NekoFiles(MaiBotPlugin):
         "neko_files_inspect",
         brief_description="查看一个文件的结构、有限预览或压缩包目录；不是全文。",
         detailed_description="只读当前聊天file_ref。预览不是全文；扫描PDF须管理员授权后显式单页OCR。",
-        parameters=[param("file_ref", "当前聊天文件编号", required=True)],
+        parameters=[param("file_ref", "list返回的当前聊天ref", required=True),
+                    param("offset", "压缩包目录分页用上次next_offset；正文不用此参数", ToolParamType.INTEGER)],
         platforms=["qq"],
         trusted_context=CONTRACT,
         timeout_ms=190000,
     )
-    async def inspect_file(self, file_ref="", **kwargs):
-        return await self.service.inspect(kwargs.get("_host_context"), file_ref)
+    async def inspect_file(self, file_ref="", offset=0, **kwargs):
+        return await self.service.inspect(kwargs.get("_host_context"), file_ref, offset)
 
     @Tool(
         "neko_files_read",
@@ -90,12 +91,12 @@ class NekoFiles(MaiBotPlugin):
         parameters=[
             param("file_ref", "当前聊天文件编号", required=True),
             param("start", "开始页/行/段落，从1开始", ToolParamType.INTEGER),
-            param("end", "结束位置，0为默认范围", ToolParamType.INTEGER),
+            param("end", "结束位置；0为默认100单位，关键词时0为已解析末尾；OCR必须start=end", ToolParamType.INTEGER),
             param("sheet", "XLSX工作表名"),
-            param("keyword", "关键词，从offset起查找"),
-            param("offset", "同范围字符偏移，续读用上次next_offset", ToolParamType.INTEGER),
-            param("ocr", "显式单页OCR，仅管理员开启时可用", ToolParamType.BOOLEAN),
-            param("match_offset", "关键词命中偏移，续读用next_match_offset", ToolParamType.INTEGER),
+            param("keyword", "在start/end范围和所选工作表内不区分大小写查找；空为普通读取"),
+            param("offset", "结果文本的字符偏移，不是搜索起点。先按next_offset读完本批，保持其它参数", ToolParamType.INTEGER),
+            param("ocr", "显式PDF单页OCR，必须start=end；需管理员开启。续读保ocr=true；unknown不重试", ToolParamType.BOOLEAN),
+            param("match_offset", "命中批次偏移；本批next_offset为空后用next_match_offset，并将offset清零。优先照返回next_call", ToolParamType.INTEGER),
         ],
         platforms=["qq"],
         trusted_context=CONTRACT,
@@ -127,7 +128,7 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_archive_read",
-        brief_description="读取压缩包目录中一份指定文档成员；先inspect看目录，不递归不执行。",
+        brief_description="读取压缩包中一份文档；先inspect分页找完整成员name，不递归不执行。返回member_file_ref可作read的file_ref续读。",
         detailed_description="先inspect查看目录，member按目录填写。仅一份文档，不执行、不递归、不读包内视频或密码包。返回成员file_ref用于续读。",
         parameters=[
             param("file_ref", "原压缩包编号", required=True),

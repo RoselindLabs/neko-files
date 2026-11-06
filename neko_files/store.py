@@ -11,6 +11,7 @@ import time
 from contextlib import contextmanager
 
 from .authorization import FileError
+from .archives import extension
 
 
 class Store:
@@ -56,7 +57,11 @@ class Store:
         size = raw.get("file_size", raw.get("size", 0))
         if size < 0:
             raise FileError("文件大小无效")
-        name = name.replace("\\", "/").rsplit("/", 1)[-1][:240]
+        name = name.replace("\\", "/").rsplit("/", 1)[-1]
+        if len(name) > 240:
+            suffix = extension(name)
+            # Display shortening must not change the member's parser type.
+            name = name[:240 - len(suffix)] + suffix if len(suffix) < 40 else name[:240]
         if not name or any(ord(ch) < 32 for ch in name):
             raise FileError("文件名无效")
         busid = raw.get("busid", 0)
@@ -165,7 +170,8 @@ class Store:
     def admit_ocr(self, c, ref, page):
         key = hashlib.sha256((self.scope(c) + "\0" + ref + "\0" + str(page)).encode()).hexdigest()
         with self.connect() as con:
-            con.execute("DELETE FROM ocr_attempts WHERE created < ?", (time.time() - 3600,))
+            # Unknown admissions are durable tombstones, not cache entries.
+            # Legacy rows have no outcome proof: retain them conservatively.
             if con.execute("SELECT COUNT(*) FROM ocr_attempts").fetchone()[0] >= 256:
                 return False
             return (

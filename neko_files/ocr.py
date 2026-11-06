@@ -25,6 +25,9 @@ def output(cached, item, page, offset, cap, hit):
         "next_offset": offset + cap if offset + cap < len(text) else None,
         "output_truncated": offset + cap < len(text),
         "model_truncated": cached.get("model_truncated"),
+        "next_call": {"tool": "neko_files_read", "file_ref": item["ref"],
+                      "start": page, "end": page, "ocr": True, "offset": offset + cap}
+        if offset + cap < len(text) else None,
         "instruction": NOTICE,
     }
 
