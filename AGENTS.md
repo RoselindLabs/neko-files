@@ -1,6 +1,7 @@
 # Neko Files repair workspace
 
-- User authorized source repair/refactoring; host changes go to `E:/MaiBot` on `neko/main` only.
+- User authorized source repair/refactoring; host changes go to the sibling host checkout
+  (`../../MaiBot` from this repository) on `neko/main` only.
 - No production installation, enablement, configuration import, service restart, remote plugin
   repository or public release is authorized. The recovered baseline remains immutable in
   `E:/bot-plugins/neko-files-review/original`.
