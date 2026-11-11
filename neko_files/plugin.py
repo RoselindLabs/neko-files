@@ -54,12 +54,12 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_list",
-        brief_description="查找聊天附件、群文件/PDF，先取得ref再用inspect/read读取。默认仅近7天登记索引，未查群目录/全部历史，空不代表无附件；明确请求且已授权才include_group=true，根目录省略folder_id。",
-        detailed_description="只返回索引，不下载。include_group仅用于明确查询且管理员开启的当前群目录。next_cursor续读5分钟作用域快照；来源超限会标记source_truncated。",
+        brief_description="查找聊天附件、群文件/PDF的ref，供inspect/read使用；只列索引，不下载。",
+        detailed_description="默认仅查近7天登记索引，不含群目录或全部历史；空结果不代表无附件。来源超限标记source_truncated。",
         parameters=[
-            param("include_group", "查询当前群目录", ToolParamType.BOOLEAN),
+            param("include_group", "是否查询当前群目录；仅明确请求且管理员已开启时设为true", ToolParamType.BOOLEAN),
             param("folder_id", "子目录真实编号，只用返回值；群根目录省略，不猜0/root"),
-            param("cursor", "上次的next_cursor，续读只填此项；若schema要求session_id，沿用上次真实目标会话的session_id"),
+            param("cursor", "上次的next_cursor，续读5分钟作用域快照；只填此项。若schema要求session_id，沿用上次真实目标会话的session_id"),
             param("message_id", "真实消息ID或引用所在消息ID；最多一跳，与目录/游标互斥；不猜短编号"),
         ],
         platforms=["qq"],
@@ -86,8 +86,8 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_read",
-        brief_description="读取群文件/聊天文档、PDF正文，按页/行/段范围或关键词检索、续读。OCR仅PDF单页start=end、offset>=0，不带sheet/keyword/match_offset，会调用配置模型；已准入不重做，续读只读缓存。",
-        detailed_description="页/行/段从1开始。关键词先按next_offset读完当前批，再用next_match_offset查下批。OCR仅显式单页，续读只读缓存，未知不重试。",
+        brief_description="读取群文件、聊天文档或PDF正文，支持页/行/段范围、关键词检索及续读。",
+        detailed_description="关键词先按next_offset读完本批，再用next_match_offset查下批。OCR已准入不重做，未知不重试，续读只读缓存。",
         parameters=[
             param("file_ref", "当前聊天文件编号", required=True),
             param("start", "开始页/行/段落，从1开始", ToolParamType.INTEGER),
@@ -128,11 +128,11 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_archive_read",
-        brief_description="读取压缩包中一份文档；先inspect分页找完整成员name，不递归不执行。返回member_file_ref可作read的file_ref续读。",
-        detailed_description="先inspect查看目录，member按目录填写。仅一份文档，不执行、不递归、不读包内视频或密码包。返回成员file_ref用于续读。",
+        brief_description="读取压缩包内一份文档；返回member_file_ref可作read的file_ref续读。",
+        detailed_description="不执行、不递归，不读包内视频或密码包。",
         parameters=[
             param("file_ref", "原压缩包编号", required=True),
-            param("member", "完整成员名，按inspect目录填写", required=True),
+            param("member", "先用inspect分页查目录，再填写完整成员name", required=True),
         ],
         platforms=["qq"],
         trusted_context=CONTRACT,
