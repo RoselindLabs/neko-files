@@ -64,7 +64,7 @@ async def verify(args):
             root / "neko_files", target / "neko_files", ignore=shutil.ignore_patterns("__pycache__")
         )
         (target / "config.toml").write_text(
-            '[plugin]\nenabled=true\nconfig_version="1.0.0"\n[access]\ngroup_ids=["123"]\n',
+            '[plugin]\nenabled=true\nconfig_version="1.0.0"\n[access]\ngroup_ids=["123"]\ngroup_catalog=true\n',
             encoding="utf-8",
         )
         runner = PluginRunner(
@@ -85,7 +85,18 @@ async def verify(args):
                 allowed, reason = permissions.check_capability("neko.files", name)
                 if not allowed:
                     raise PermissionError(reason)
-                assert name in ["chat.get_all_streams", "message.get_by_id"], "No QQ/model capability calls allowed"
+                assert name in ["chat.get_all_streams", "message.get_by_id", "api.call"], "No model capability calls allowed"
+                if name == "api.call":
+                    query = kwargs["payload"]["args"]
+                    assert query["api_name"] == "adapter.napcat.action.call"
+                    action = query["args"]["action_name"]
+                    assert action in ["get_login_info", "get_group_root_files"], "No download/send actions"
+                    data = {"user_id": "789"} if action == "get_login_info" else {
+                        "files": [{"file_id": "catalog", "name": "catalog.txt", "size": 4}], "folders": []
+                    }
+                    return SimpleNamespace(error=None, payload={"result": {
+                        "success": True, "result": {"status": "ok", "data": data}
+                    }})
                 if name == "message.get_by_id":
                     query = kwargs["payload"]["args"]
                     assert query["chat_id"] == "a" and not query["include_binary_data"]
@@ -144,12 +155,11 @@ async def verify(args):
             record = await meta.instance.service.db(
                 "register", c, {"file_id": "synthetic", "name": "safe.txt", "size": 4}
             )
-            entry = SimpleNamespace(
-                invoke_method="plugin.invoke_tool",
-                metadata=next(t["metadata"] for t in tools if t["name"] == "neko_files_list"),
-            )
-
-            async def invoke(sid, group, **arguments):
+            async def invoke(sid, group, tool="neko_files_list", **arguments):
+                entry = SimpleNamespace(
+                    name=tool, plugin_id="neko.files", invoke_method="plugin.invoke_tool",
+                    metadata=next(t["metadata"] for t in tools if t["name"] == tool),
+                )
                 context = SimpleNamespace(
                     session_id=sid,
                     stream_id=sid,
@@ -159,25 +169,75 @@ async def verify(args):
                     metadata={},
                 )
                 payload = ComponentQueryService._build_tool_invocation_payload(
-                    entry,
                     SimpleNamespace(arguments={**arguments, "_host_context": {"session_id": "forged"}}),
                     context,
+                    entry=entry,
                 )
                 request = Envelope(
                     request_id=1,
                     message_type="request",
                     method="plugin.invoke_tool",
                     plugin_id="neko.files",
-                    payload={"component_name": "neko_files_list", "args": payload},
+                    payload={"component_name": tool, "args": payload},
                 )
                 response = await runner._handle_invoke(request)
                 assert response.error is None
-                return response.payload["result"]
+                result = response.payload["result"]
+                normalized = ComponentQueryService._parse_tool_invoke_result(entry, result)
+                assert normalized.content == result["content"]
+                assert normalized.structured_content is result, "Host must preserve original caller fields"
+                return result
 
             accepted = await invoke("a", "123")
             denied = await invoke("b", "456")
             assert accepted["success"] and accepted["files"][0]["ref"] == record["ref"]
+            visible = json.loads(accepted["content"])
+            assert "directory_complete" not in visible and "近7天" in visible["search_instruction"]
+            assert "message_id" in accepted["files"][0] and "message_id" not in visible["files"][0]
             assert not denied["success"] and record["ref"] not in str(denied)
+            assert "管理员核对当前会话" in denied["content"] and "借用别群" in denied["content"]
+            with meta.instance.service.store.connect() as con:
+                con.execute("UPDATE files SET created=created-8*86400")
+            empty = await invoke("a", "123")
+            assert empty["files"] == [] and "空结果不代表没有附件" in empty["content"]
+            assert "api.call" not in capabilities, "Default registry lookup must not query the group"
+            group = await invoke("a", "123", include_group=True)
+            assert group["success"] and json.loads(group["content"])["directory_complete"] is True
+
+            # Real SQLite + committed synthetic source/parser cache, through SDK Runner and Host.
+            service = meta.instance.service
+            record = await service.db("register", c, {"file_id": "read", "name": "read.txt", "size": 4})
+            service.cache.path(record["ref"], ".txt").write_bytes(b"safe")
+            source = await service.cache.commit(record["ref"], ".txt")
+            await service.cache.write_json(service.cache.path(record["ref"], ".parsed.v2.json"), {
+                "format": 2, "sha256": source["sha256"], "document": {
+                    "kind": "lines", "units": [{"label": str(n), "text": "hit " + "x" * 100}
+                                                for n in range(1, 131)]
+                }
+            })
+            bounded = await invoke("a", "123", tool="neko_files_read", file_ref=record["ref"], start=1, end=2)
+            assert bounded["success"] and bounded["next_call"] is None
+            assert "指定范围已读完" in bounded["content"]
+            for end, keyword in [(100, ""), (0, ""), (31, "hit")]:
+                arguments = {"file_ref": record["ref"], "start": 1, "end": end, "keyword": keyword}
+                for _ in range(10):
+                    service.rates.clear()
+                    result = await invoke("a", "123", tool="neko_files_read", **arguments)
+                    assert result["success"], result
+                    visible = json.loads(result["content"])
+                    assert visible["requested_range"]["end"] == end
+                    assert "parse_truncated" in visible and "output_truncated" in visible
+                    if result["next_call"] is None:
+                        assert visible["next_call"] is None
+                        break
+                    following = dict(result["next_call"])
+                    following.pop("tool")
+                    if result["output_truncated"]:
+                        assert (following["start"], following["end"]) == (arguments["start"], arguments["end"])
+                    assert "沿用上次真实目标会话的session_id" in visible["continuation_instruction"]
+                    arguments = following
+                else:
+                    raise AssertionError("Read continuation did not finish")
             sourced = await invoke("a", "123", message_id="1001")
             assert sourced["success"] and sourced["files"][0]["source_verified"]
             assert sourced["files"][0]["size"] == 4
@@ -212,6 +272,9 @@ async def verify(args):
                 "trusted_host_to_runner_rpc": True,
                 "cross_scope_denied": True,
                 "normalized_message_source_and_permission_denial": True,
+                "sdk_to_host_content_and_structured_compatibility": True,
+                "registry_vs_group_directory": True,
+                "explicit_range_and_character_keyword_continuation": True,
                 "host_version": args.host_version,
                 "sdk_version": importlib.metadata.version("maibot-plugin-sdk"),
                 "config_reload_disabled_then_enabled": True,
@@ -233,7 +296,7 @@ async def verify(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--host-source", type=Path, required=True)
-    parser.add_argument("--host-version", default="1.3.15")
+    parser.add_argument("--host-version", default="1.4.3")
     parser.add_argument("--temp-dir", type=Path)
     parser.add_argument("--extra-site-packages", type=Path)
     parser.add_argument("--report", type=Path)

@@ -54,12 +54,12 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_list",
-        brief_description="找聊天中的文件先调用本工具取得ref，再用inspect/read的file_ref读取。可查群目录；根目录省略folder_id。失败/未读完不等于没有文件。",
+        brief_description="查找聊天附件、群文件/PDF，先取得ref再用inspect/read读取。默认仅近7天登记索引，未查群目录/全部历史，空不代表无附件；明确请求且已授权才include_group=true，根目录省略folder_id。",
         detailed_description="只返回索引，不下载。include_group仅用于明确查询且管理员开启的当前群目录。next_cursor续读5分钟作用域快照；来源超限会标记source_truncated。",
         parameters=[
             param("include_group", "查询当前群目录", ToolParamType.BOOLEAN),
             param("folder_id", "子目录真实编号，只用返回值；群根目录省略，不猜0/root"),
-            param("cursor", "上次的next_cursor，续读只填此项"),
+            param("cursor", "上次的next_cursor，续读只填此项；若schema要求session_id，沿用上次真实目标会话的session_id"),
             param("message_id", "真实消息ID或引用所在消息ID；最多一跳，与目录/游标互斥；不猜短编号"),
         ],
         platforms=["qq"],
@@ -73,7 +73,7 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_inspect",
-        brief_description="查看一个文件的结构、有限预览或压缩包目录；不是全文。",
+        brief_description="查看群文件/聊天文档、PDF的结构、有限预览或压缩包目录；不是全文。",
         detailed_description="只读当前聊天file_ref。预览不是全文；扫描PDF须管理员授权后显式单页OCR。",
         parameters=[param("file_ref", "list返回的当前聊天ref", required=True),
                     param("offset", "压缩包目录分页用上次next_offset；正文不用此参数", ToolParamType.INTEGER)],
@@ -86,16 +86,16 @@ class NekoFiles(MaiBotPlugin):
 
     @Tool(
         "neko_files_read",
-        brief_description="按页/行/段落范围读取文档正文、关键词查找、续读，或显式单页OCR。",
+        brief_description="读取群文件/聊天文档、PDF正文，按页/行/段范围或关键词检索、续读。OCR仅PDF单页start=end、offset>=0，不带sheet/keyword/match_offset，会调用配置模型；已准入不重做，续读只读缓存。",
         detailed_description="页/行/段从1开始。关键词先按next_offset读完当前批，再用next_match_offset查下批。OCR仅显式单页，续读只读缓存，未知不重试。",
         parameters=[
             param("file_ref", "当前聊天文件编号", required=True),
             param("start", "开始页/行/段落，从1开始", ToolParamType.INTEGER),
-            param("end", "结束位置；0为默认100单位，关键词时0为已解析末尾；OCR必须start=end", ToolParamType.INTEGER),
+            param("end", "结束位置；指定范围读完即停止，0为自动100单位续页，关键词时0为已解析末尾；OCR必须start=end", ToolParamType.INTEGER),
             param("sheet", "XLSX工作表名"),
             param("keyword", "在start/end范围和所选工作表内不区分大小写查找；空为普通读取"),
             param("offset", "结果文本的字符偏移，不是搜索起点。先按next_offset读完本批，保持其它参数", ToolParamType.INTEGER),
-            param("ocr", "显式PDF单页OCR，必须start=end；需管理员开启。续读保ocr=true；unknown不重试", ToolParamType.BOOLEAN),
+            param("ocr", "显式PDF单页OCR：start=end、offset>=0，不带sheet/keyword/match_offset；需管理员开启，会调用配置模型。续读保ocr=true，只读缓存；unknown或成功缓存丢失均不重做", ToolParamType.BOOLEAN),
             param("match_offset", "命中批次偏移；本批next_offset为空后用next_match_offset，并将offset清零。优先照返回next_call", ToolParamType.INTEGER),
         ],
         platforms=["qq"],

@@ -61,7 +61,7 @@ async def read(
         or keyword
         or match_offset != 0
     ):
-        raise FileError("OCR未授权或参数无效；仅PDF单页、start=end，offset非负")
+        raise FileError("OCR未授权或参数无效；仅PDF单页、start=end，offset非负，不带sheet/keyword/match_offset")
     async with service.ocr_lock:
         check()
         cached_path = service.cache.path(item["ref"], f".ocr-{start}.json")

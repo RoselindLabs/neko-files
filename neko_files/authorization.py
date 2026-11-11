@@ -8,6 +8,10 @@ class FileError(ValueError):
     pass
 
 
+def identity_error(message):
+    return FileError(message + "；请管理员核对当前会话与机器人账号/授权，不要自填账号或借用别群")
+
+
 def numeric(value):
     return isinstance(value, str) and re.fullmatch(r"[1-9][0-9]{0,19}", value) is not None
 
@@ -34,7 +38,7 @@ async def authorize(ctx, config, envelope):
     if not config.plugin.enabled:
         raise FileError("文件插件未启用")
     if not isinstance(envelope, dict) or envelope.get("contract") != "neko.tools.context.v1":
-        raise FileError("宿主缺少可信工具上下文补丁，已拒绝文件操作")
+        raise identity_error("宿主缺少可信工具上下文补丁，已拒绝文件操作")
     session = envelope.get("session_id")
     if (
         not isinstance(session, str)
@@ -42,7 +46,7 @@ async def authorize(ctx, config, envelope):
         or envelope.get("stream_id") != session
         or envelope.get("platform") != "qq"
     ):
-        raise FileError("可信QQ会话信息不完整")
+        raise identity_error("可信QQ会话信息不完整")
     a = config.access
     if (
         len(a.group_ids) > 16
@@ -50,14 +54,14 @@ async def authorize(ctx, config, envelope):
         or not all(numeric(v) for v in [*a.group_ids, *a.user_ids])
         or (a.account_id and not numeric(a.account_id))
     ):
-        raise FileError("QQ授权名单或机器人账号格式无效")
+        raise identity_error("QQ授权名单或机器人账号格式无效")
     async with asyncio.timeout(3):
         rows = await ctx.chat.get_all_streams(platform="qq")
     if not isinstance(rows, list) or len(rows) > 512:
-        raise FileError("宿主会话查询不可用或超限")
+        raise identity_error("宿主会话查询不可用或超限")
     matches = [r for r in rows if isinstance(r, dict) and r.get("session_id") == session]
     if len(matches) != 1:
-        raise FileError("当前会话归属无法唯一核实")
+        raise identity_error("当前会话归属无法唯一核实")
     row = matches[0]
     group = row.get("chat_type") == "group"
     target = str(row.get("group_id" if group else "user_id") or "")
@@ -77,7 +81,7 @@ async def authorize(ctx, config, envelope):
         or (not group and envelope.get("group_id") not in [None, ""])
         or (not group and str(envelope.get("user_id") or "") != target)
     ):
-        raise FileError("当前QQ目标或机器人账号未授权")
+        raise identity_error("当前QQ目标或机器人账号未授权")
     return {
         "session": session,
         "account": account,

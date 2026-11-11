@@ -52,7 +52,10 @@ class ReviewTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
         expiry = self.service.list_pages[result["next_cursor"]]["expires"]
         while True:
             self.assertTrue(result["success"])
-            self.assertEqual(json.loads(result["content"])["files"], result["files"])
+            visible = json.loads(result["content"])
+            self.assertEqual([f["ref"] for f in visible["files"]], [f["ref"] for f in result["files"]])
+            self.assertNotIn("directory_complete", visible)
+            self.assertIn("近7天", visible["search_instruction"])
             seen.update(item["ref"] for item in result["files"])
             cursor = result["next_cursor"]
             if not cursor:
@@ -134,6 +137,102 @@ class ReviewTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["next_call"]["offset"], result["next_offset"])
             self.assertEqual(result["next_call"]["match_offset"], 0)
 
+    async def test_explicit_range_stops_but_default_range_pages_after_character_tail(self):
+        item, _ = await self.cached()
+        self.config.limits.output_chars = 500
+        document = {"kind": "lines", "units": [
+            {"label": str(n), "text": "x" * 10} for n in range(1, 131)
+        ]}
+        with patch.object(module, "worker", AsyncMock(return_value=document)):
+            for end in [2, 100, 0]:
+                arguments = {"ref": item["ref"], "start": 1, "end": end}
+                parts, starts = [], []
+                while True:
+                    self.service.rates.clear()
+                    result = await self.service.read(envelope(), **arguments)
+                    self.assertTrue(result["success"], result)
+                    parts.append(result["text"])
+                    starts.append(arguments["start"])
+                    visible = json.loads(result["content"])
+                    self.assertIn("next_call", visible)
+                    self.assertIn("parse_truncated", visible)
+                    self.assertIn("output_truncated", visible)
+                    self.assertNotIn("match_count", visible)
+                    self.assertIn("match_count", result)  # structured compatibility
+                    if result["next_call"] is None:
+                        self.assertIsNone(result["next_start"])
+                        if end:
+                            self.assertIn("指定范围已读完", visible["instruction"])
+                        break
+                    following = dict(result["next_call"])
+                    self.assertEqual(following.pop("tool"), "neko_files_read")
+                    self.assertEqual(following.pop("file_ref"), item["ref"])
+                    if result["output_truncated"]:
+                        self.assertEqual((following["start"], following["end"]),
+                                         (arguments["start"], arguments["end"]))
+                    arguments = {"ref": item["ref"], **following}
+                expected = window(document, end=end or 130, limit=100000)["text"]
+                self.assertEqual("".join(parts), expected)
+                self.assertEqual(max(starts), 101 if end == 0 else 1)
+
+    async def test_archive_member_keyword_continuation_preserves_range_and_batch(self):
+        item = await self.register("search.zip", b"")
+        path = self.service.cache.path(item["ref"], ".zip")
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("notes.txt", "\n".join("hit " + "x" * 90 for _ in range(35)))
+        await self.service.cache.commit(item["ref"], ".zip")
+
+        async def parser(source, ext, operation="parse", **options):
+            if operation == "archive-read":
+                archives.extract_member(source, ext, options["member"], Path(options["destination"]))
+                return {"extracted": True}
+            return archives.catalog(source, ext) if operation == "archive-list" else worker.parse(source, ext)
+
+        self.config.limits.output_chars = 500
+        with patch.object(module, "worker", side_effect=parser):
+            member = await self.service.read_archive(envelope(), item["ref"], "notes.txt")
+            self.assertTrue(member["success"], member)
+            arguments = {"ref": member["member_file_ref"], "start": 2, "end": 31, "keyword": "hit"}
+            offsets = set()
+            for _ in range(30):
+                self.service.rates.clear()
+                result = await self.service.read(envelope(), **arguments)
+                self.assertTrue(result["success"], result)
+                self.assertEqual(result["match_count"], 30)
+                self.assertEqual(result["file"]["parent"], item["ref"])
+                offsets.add(result["match_offset"])
+                following = result["next_call"]
+                if following is None:
+                    self.assertIn("指定范围已读完", result["instruction"])
+                    break
+                self.assertEqual((following["start"], following["end"], following["keyword"]), (2, 31, "hit"))
+                self.assertEqual(following["file_ref"], member["member_file_ref"])
+                if result["output_truncated"]:
+                    self.assertEqual(following["match_offset"], result["match_offset"])
+                else:
+                    self.assertEqual(following["offset"], 0)
+                    self.assertEqual(following["match_offset"], 20)
+                arguments = {"ref": following["file_ref"], **{k: v for k, v in following.items() if k not in {"tool", "file_ref"}}}
+            else:
+                self.fail("member keyword continuation did not finish")
+            self.assertEqual(offsets, {0, 20})
+
+    async def test_invalid_ocr_options_rejected_before_render_admission_or_model(self):
+        self.config.access.ocr = True
+        item, _ = await self.cached("page.pdf", b"synthetic")
+        document = {"kind": "pages", "units": [{"label": "1", "text": ""}]}
+        with patch.object(module, "worker", AsyncMock(return_value=document)), patch.object(ocr, "worker", AsyncMock()) as render:
+            for overrides in [{"end": 0}, {"end": 2}, {"offset": -1}, {"sheet": "Sheet1"},
+                              {"keyword": "hit"}, {"match_offset": 1}]:
+                result = await self.service.read(envelope(), item["ref"], **{
+                    "start": 1, "end": 1, "use_ocr": True, **overrides,
+                })
+                self.assertFalse(result["success"], result)
+            render.assert_not_awaited()
+        self.ctx.llm.generate.assert_not_awaited()
+        with self.service.store.connect() as con:
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM ocr_attempts").fetchone()[0], 0)
+
     def test_real_sdk_schema_contains_operational_hints(self):
         components = collect_components(NekoFiles())
         metadata = {c["name"]: c["metadata"] for c in components}
@@ -141,6 +240,8 @@ class ReviewTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
         params = {p["name"]: p["description"]
                   for p in metadata["neko_files_read"]["parameters"]}
         self.assertIn("start=end", params["ocr"])
+        self.assertIn("配置模型", params["ocr"])
+        self.assertIn("sheet/keyword/match_offset", params["ocr"])
         self.assertIn("不是搜索起点", params["offset"])
         self.assertIn("清零", params["match_offset"])
         self.assertIn("member_file_ref", metadata["neko_files_archive_read"]["description"])

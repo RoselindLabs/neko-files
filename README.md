@@ -1,6 +1,14 @@
-# Neko Files 0.3.4
+# Neko Files 0.4.1
 
-0.4.0为本次审查修复源码，未据本地版本宣称部署。继承0.3.4稳定ID重新取址、未知busid省略及URL-only十分钟边界。
+0.4.1为本次修复源码，尚未部署。已登记线上基线为0.4.0/`2f359c8`；本次从文档HEAD `25a0b02`修复，二者业务源码相同。继承稳定ID重新取址、未知busid省略、URL-only十分钟边界和OCR永久准入。
+
+## 0.4.1 索引与续读
+
+- 默认list仅当前聊天/账号近7天仍保留的登记索引，未查询群目录或全部历史；空结果不代表没有附件。只有明确请求且管理员已授权才用`include_group=true`，不新增遍历。`directory_complete`仅实际群目录查询及其cursor续页返回，不用于默认索引；它不表示已遍历子目录或全部历史。
+- 普通read指定`end>0`读完该范围后`next_call=null`，不再跳到范围之外；只有`end=0`自动按100单位续页。字符截断续读保原start/end并前进offset，关键词先读完本批再前进match_offset；压缩包成员沿member_file_ref续读。
+- Host消费的content只省去不适用的空来源字段、空工作表/关键词及无关键词时的匹配字段；ref、来源可信状态、读取范围、解析/输出截断、next_call终态保留。原结构结果字段保留（默认索引错误的directory_complete字段除外），无数据库/配置迁移。
+- 身份/授权失败请管理员核对当前会话与机器人账号/授权，不自填账号、不借别群。若Focus工具schema要求session_id，续调用沿用上次真实目标会话的session_id；scope及cursor授权逻辑保持。
+- OCR仅PDF单页`start=end`、`offset>=0`，不带sheet/keyword/match_offset，会调用已配置的vlm模型；普通读取不自动OCR。非法组合在渲染/准入/模型调用前拒绝，原永久准入、缓存丢失不重做及unknown保护继续保留，没有新增费用确认流程。
 
 ## 0.4.0 使用与回退边界
 
@@ -54,7 +62,7 @@
 
 ## 工具
 
-1. `neko_files_list`：当前会话索引；明确授权后用 `include_group`/`folder_id` 查目录。
+1. `neko_files_list`：当前会话近7天仍保留的登记索引，空不代表没有附件；明确请求且已授权后用 `include_group`/`folder_id` 查目录。
     每页20项，5分钟 scope-bound cursor，不重查QQ；来源最多500文件/目录，超出明确标记。
    可单独填`message_id`登记旧消息或引用所在消息的附件（最多8份、一跳）；与include_group/folder_id/cursor互斥，登记不下载。
 2. `neko_files_inspect(file_ref)`：结构、有限预览、压缩包目录；不是全文。

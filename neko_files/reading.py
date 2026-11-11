@@ -65,11 +65,15 @@ def window(document, start=1, end=0, sheet="", keyword="", offset=0, limit=8000,
         else None,
         "match_offset": match_offset,
         "next_offset": offset + limit if truncated else None,
-        "next_start": last + 1 if not keyword and not truncated and last < len(units) else None,
+        "next_start": last + 1 if not end and not keyword and not truncated and last < len(units) else None,
         "available_units": len(units),
         "unit_kind": document["kind"],
         "parse_truncated": document.get("truncated", False),
         "requested_range": {"start": start, "end": end, "sheet": sheet, "keyword": keyword},
         "offset": offset,
-        "instruction": NOTICE,
+        "instruction": NOTICE + (
+            "指定范围已读完，不代表全文。"
+            if end and not truncated and not (keyword and match_offset + 20 < len(matches))
+            else ""
+        ),
     }

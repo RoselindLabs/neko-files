@@ -1,3 +1,11 @@
+# 0.4.1 Registry scope and bounded continuation (local candidate)
+
+- Label default list as the current scope's retained seven-day registration index, not a complete group directory/history; reserve directory_complete for actual group-directory snapshots.
+- Stop explicit end ranges after their character tail. Preserve end=0 unit paging, keyword batch offsets and archive member refs.
+- Clarify model-visible file/PDF discovery, single-page OCR constraints and configured-model use, administrator identity checks and real-session continuation.
+- Trim only inapplicable content fields; keep structured caller fields, source/ref, range, truncation and next_call. No scope/cursor permission, storage, cache or permanent OCR-admission changes.
+- Offline SQLite/SDK/Host regressions only; no production deployment or real model/download/QQ/TG probes.
+
 # 0.4.0 Scoped reader reliability and model contracts
 
 - Preserve every OCR admission (including legacy unknown outcomes) independently of the one-hour success cache. At 256 admissions fail closed; time, reload and eviction never authorize another request. No ledger deletion or schema rewrite.

@@ -1,5 +1,6 @@
 """Real SDK bottom-RPC regression: metadata listing is not download admission."""
 import copy
+import json
 from tempfile import TemporaryDirectory
 from pathlib import Path
 import unittest
@@ -59,6 +60,28 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['skipped_files'], 0)
         self.assertFalse(any('file_url' in action for action, _ in self.calls))
         self.assertEqual(self.calls[-1], ('get_group_root_files', {'group_id': '123'}))
+
+    async def test_default_index_is_recent_scoped_registry_not_group_directory(self):
+        old = await self.service.db('register', scope(), {'file_id': 'old', 'name': 'old.txt'})
+        await self.service.db('register', scope(session='b'), {'file_id': 'other', 'name': 'other.txt'})
+        await self.service.db('register', scope(account='987'), {'file_id': 'account', 'name': 'account.txt'})
+        with self.service.store.connect() as con:
+            con.execute('UPDATE files SET created=created-8*86400 WHERE id=?', (old['ref'],))
+        empty = await self.service.list_files(envelope())
+        self.assertEqual(empty['files'], [])
+        self.assertNotIn('directory_complete', empty)
+        visible = json.loads(empty['content'])
+        self.assertNotIn('directory_complete', visible)
+        self.assertIn('近7天', visible['search_instruction'])
+        self.assertIn('空结果不代表没有附件', visible['search_instruction'])
+        self.assertEqual(self.calls, [])
+        current = await self.service.db('register', scope(), {'file_id': 'now', 'name': 'now.txt'})
+        listed = await self.service.list_files(envelope())
+        self.assertEqual([f['ref'] for f in listed['files']], [current['ref']])
+        self.assertEqual(self.calls, [])
+        group = await self.service.list_files(envelope(), include_group=True)
+        self.assertTrue(json.loads(group['content'])['directory_complete'])
+        self.assertIn('未遍历子目录', group['search_instruction'])
 
     async def test_metadata_size_does_not_raise_download_limit(self):
         result = await self.service.list_files(envelope(), include_group=True)
