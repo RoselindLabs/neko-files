@@ -631,7 +631,7 @@ wheels = [
 
 [[package]]
 name = "neko-files-local"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -650,7 +650,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12,<4" },
-    { name = "maibot-plugin-sdk", specifier = "==2.16.0" },
+    { name = "maibot-plugin-sdk", specifier = ">=2.16.0,<=2.23.0" },
     { name = "openpyxl", specifier = ">=3.1,<4" },
     { name = "pymupdf", specifier = ">=1.26,<2" },
     { name = "python-docx", specifier = ">=1.2,<2" },

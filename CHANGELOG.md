@@ -1,3 +1,7 @@
+# 0.4.2 Compatibility bounds
+
+- Declare support for Neko Host 1.3.15–1.4.6 and SDK 2.16.0–2.23.0 (inclusive). The trusted-context fork and SnowLuma adapter >=1.1.5 are still required; capabilities and access checks are unchanged.
+
 # 0.4.1 Registry scope and bounded continuation (local candidate)
 
 - Label default list as the current scope's retained seven-day registration index, not a complete group directory/history; reserve directory_complete for actual group-directory snapshots.

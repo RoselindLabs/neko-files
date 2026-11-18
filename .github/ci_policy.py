@@ -156,7 +156,7 @@ def plugin_matrix(plugin, full=False):
     if plugin == "neko-tts":
         sdks.insert(1, ("baseline", "==2.12.0"))
     if plugin == "neko-files":
-        sdks = [("minimum", minimum), ("latest", ">=2.16,<3")]
+        sdks = [("minimum", minimum), ("latest", "==2.23.0")]
     rows = [production]
     for system, python, (sdk, spec) in itertools.product(
         ["ubuntu-latest", "windows-latest"], pythons, sdks
