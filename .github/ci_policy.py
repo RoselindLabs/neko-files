@@ -133,7 +133,7 @@ def plugin_matrix(plugin, full=False):
         minimum = "==2.16.0"
     oldest = "3.10" if plugin == "neko-server-status" else "3.12"
     production = {
-        "os": "ubuntu-latest",
+        "os": "ubuntu-24.04",  # setup-python has a 3.14.4 build for 24.04, not 26.04.
         "python": PRODUCTION_PYTHON,
         "sdk": "production",
         "sdk_spec": PRODUCTION_SDK,
