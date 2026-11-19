@@ -235,8 +235,13 @@ class ReviewTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
 
     def test_real_sdk_schema_contains_operational_hints(self):
         components = collect_components(NekoFiles())
-        metadata = {c["name"]: c["metadata"] for c in components}
-        # Only fields actually consumed by Host; deliberately exclude details.
+        metadata = {c["name"]: c["metadata"] for c in components if c["type"] == "TOOL"}
+        self.assertEqual({name: meta["description"] for name, meta in metadata.items()}, {
+            "neko_files_list": "在近期索引中查找聊天附件或群文件，获取文件编号。",
+            "neko_files_inspect": "按文件编号查看文档结构、PDF 预览或压缩包目录。",
+            "neko_files_read": "按文件编号读取、检索或续读文档及 PDF 正文。",
+            "neko_files_archive_read": "按压缩包编号和成员名读取其中一份文档。",
+        })
         params = {p["name"]: p["description"]
                   for p in metadata["neko_files_read"]["parameters"]}
         self.assertIn("start=end", params["ocr"])
@@ -244,4 +249,4 @@ class ReviewTests(ServiceFixture, unittest.IsolatedAsyncioTestCase):
         self.assertIn("sheet/keyword/match_offset", params["ocr"])
         self.assertIn("不是搜索起点", params["offset"])
         self.assertIn("清零", params["match_offset"])
-        self.assertIn("member_file_ref", metadata["neko_files_archive_read"]["description"])
+        self.assertIn("member_file_ref", params["file_ref"])

@@ -41,6 +41,7 @@ async def verify(args):
         from src.plugin_runtime import ENV_HOST_VERSION
         from src.plugin_runtime.protocol.envelope import Envelope
         from src.plugin_runtime.component_query import ComponentQueryService
+        from src.plugin_runtime.host.component_registry import ToolEntry
         from src.plugin_runtime.host.authorization import AuthorizationManager
         from src.common.database.database import engine
         from src.common.logger import close_handlers
@@ -149,6 +150,9 @@ async def verify(args):
             assert len(tools) == 4 and all(
                 item["metadata"]["trusted_context"] == "neko.tools.context.v1" for item in tools
             )
+            for item in tools:
+                entry = ToolEntry(item["name"], item["component_type"], "neko.files", item["metadata"])
+                assert ComponentQueryService._build_tool_spec(entry).description == item["metadata"]["description"]
             bad = runner._normalize_plugin_config(meta.instance, {"plugin": {"enabled": True}})
             assert bad.config_error, "Missing version must not look business-ready"
             c = {"session": "a", "account": "789", "group": "123", "user": "111"}

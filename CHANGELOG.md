@@ -1,3 +1,7 @@
+# 0.4.3 Tool catalog descriptions
+
+- Give each of the four tools a one-sentence catalog entry. Keep index coverage, single-page OCR and continuation instructions in parameters and results; authorization and file operations are unchanged.
+
 # 0.4.2 Compatibility bounds
 
 - Declare support for Neko Host 1.3.15–1.4.6 and SDK 2.16.0–2.23.0 (inclusive). The trusted-context fork and SnowLuma adapter >=1.1.5 are still required; capabilities and access checks are unchanged.
